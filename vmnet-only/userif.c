@@ -62,7 +62,7 @@ typedef struct VNetUserIFStats {
 typedef struct VNetUserIF {
    VNetPort               port;
    struct sk_buff_head    packetQueue;
-   uint32*                pollPtr;
+   Atomic_uint32         *pollPtr;
    MonitorActionIntr     *actionIntr;
    uint32                 pollMask;
    MonitorIdemAction      actionID;
@@ -194,6 +194,14 @@ static INLINE int
 VNetUserIfSetupNotify(VNetUserIF *userIf, // IN
                       VNet_Notify *vn)    // IN
 {
+   unsigned long flags;
+   struct sk_buff_head *q = &userIf->packetQueue;
+   uint32 *pollPtr;
+   MonitorActionIntr *actionIntr;
+   uint32 *recvClusterCount;
+   struct page *pollPage = NULL;
+   struct page *actPage = NULL;
+   struct page *recvClusterPage = NULL;
    int retval;
 
    if (userIf->pollPtr || userIf->actionIntr || userIf->recvClusterCount) {
@@ -201,28 +209,63 @@ VNetUserIfSetupNotify(VNetUserIF *userIf, // IN
       return -EBUSY;
    }
 
-   if ((retval = VNetUserIfMapUint32Ptr((VA)vn->pollPtr, &userIf->pollPage,
-                                        &userIf->pollPtr)) < 0) {
+   if ((retval = VNetUserIfMapUint32Ptr((VA)vn->pollPtr, &pollPage,
+                                        &pollPtr)) < 0) {
       return retval;
    }
 
-   if ((retval = VNetUserIfMapPtr((VA)vn->actPtr, sizeof *userIf->actionIntr,
-                                  &userIf->actPage,
-                                  (void **)&userIf->actionIntr)) < 0) {
-      VNetUserIfUnsetupNotify(userIf);
-      return retval;
+   /* Atomic operations require proper alignment */
+   if ((uintptr_t)pollPtr & (sizeof *pollPtr - 1)) {
+      LOG(0, (KERN_DEBUG "vmnet: Incorrect notify alignment\n"));
+      retval = -EFAULT;
+      goto error_free;
    }
 
-   if ((retval = VNetUserIfMapUint32Ptr((VA)vn->recvClusterPtr, 
-                                        &userIf->recvClusterPage,
-                                        &userIf->recvClusterCount)) < 0) {
-      VNetUserIfUnsetupNotify(userIf);
-      return retval;
+   if ((retval = VNetUserIfMapPtr((VA)vn->actPtr, sizeof *actionIntr,
+                                  &actPage,
+                                  (void **)&actionIntr)) < 0) {
+      goto error_free;
    }
 
+   if ((retval = VNetUserIfMapUint32Ptr((VA)vn->recvClusterPtr,
+                                        &recvClusterPage,
+                                        &recvClusterCount)) < 0) {
+      goto error_free;
+   }
+
+   spin_lock_irqsave(&q->lock, flags);
+   if (userIf->pollPtr || userIf->actionIntr || userIf->recvClusterCount) {
+      spin_unlock_irqrestore(&q->lock, flags);
+      retval = -EBUSY;
+      LOG(0, (KERN_DEBUG "vmnet: Notification mechanism already active\n"));
+      goto error_free;
+   }
+
+   userIf->pollPtr = (Atomic_uint32 *)pollPtr;
+   userIf->pollPage = pollPage;
+   userIf->actionIntr = actionIntr;
+   userIf->actPage = actPage;
+   userIf->recvClusterCount = recvClusterCount;
+   userIf->recvClusterPage = recvClusterPage;
    userIf->pollMask = vn->pollMask;
    userIf->actionID = vn->actionID;
+   spin_unlock_irqrestore(&q->lock, flags);
    return 0;
+
+ error_free:
+   if (pollPage) {
+      kunmap(pollPage);
+      put_page(pollPage);
+   }
+   if (actPage) {
+      kunmap(actPage);
+      put_page(actPage);
+   }
+   if (recvClusterPage) {
+      kunmap(recvClusterPage);
+      put_page(recvClusterPage);
+   }
+   return retval;
 }
 
 /*
@@ -245,24 +288,14 @@ VNetUserIfSetupNotify(VNetUserIF *userIf, // IN
 static void
 VNetUserIfUnsetupNotify(VNetUserIF *userIf) // IN
 {
-   if (userIf->pollPage) {
-      kunmap(userIf->pollPage);
-      put_page(userIf->pollPage);
-   } else {
-      LOG(0, (KERN_DEBUG "vmnet: pollPtr was already deactivated\n"));
-   }
-   if (userIf->actPage) {
-      kunmap(userIf->actPage);
-      put_page(userIf->actPage);
-   } else {
-      LOG(0, (KERN_DEBUG "vmnet: actPtr was already deactivated\n"));
-   }
-   if (userIf->recvClusterPage) {
-      kunmap(userIf->recvClusterPage);
-      put_page(userIf->recvClusterPage);
-   } else {
-      LOG(0, (KERN_DEBUG "vmnet: recvClusterPtr was already deactivated\n"));
-   }
+   unsigned long flags;
+   struct page *pollPage = userIf->pollPage;
+   struct page *actPage = userIf->actPage;
+   struct page *recvClusterPage = userIf->recvClusterPage;
+
+   struct sk_buff_head *q = &userIf->packetQueue;
+
+   spin_lock_irqsave(&q->lock, flags);
    userIf->pollPtr = NULL;
    userIf->pollPage = NULL;
    userIf->actionIntr = NULL;
@@ -271,6 +304,21 @@ VNetUserIfUnsetupNotify(VNetUserIF *userIf) // IN
    userIf->recvClusterPage = NULL;
    userIf->pollMask = 0;
    userIf->actionID = -1;
+   spin_unlock_irqrestore(&q->lock, flags);
+
+   /* Release */
+   if (pollPage) {
+      kunmap(pollPage);
+      put_page(pollPage);
+   }
+   if (actPage) {
+      kunmap(actPage);
+      put_page(actPage);
+   }
+   if (recvClusterPage) {
+      kunmap(recvClusterPage);
+      put_page(recvClusterPage);
+   }
 }
 
 
@@ -342,6 +390,7 @@ VNetUserIfReceive(VNetJack       *this, // IN
 {
    VNetUserIF *userIf = (VNetUserIF*)this->private;
    uint8 *dest = SKB_2_DESTMAC(skb);
+   unsigned long flags;
    
    if (!UP_AND_RUNNING(userIf->port.flags)) {
       userIf->stats.droppedDown++;
@@ -370,13 +419,20 @@ VNetUserIfReceive(VNetJack       *this, // IN
 
    userIf->stats.queued++;
 
-   skb_queue_tail(&userIf->packetQueue, skb);
+   spin_lock_irqsave(&userIf->packetQueue.lock, flags);
+   /*
+    * __skb_dequeue_tail does not take any locks so must be used with
+    * appropriate locks held only.
+    */
+   __skb_queue_tail(&userIf->packetQueue, skb);
    if (userIf->pollPtr) {
-      *userIf->pollPtr |= userIf->pollMask;
+      Atomic_Or(userIf->pollPtr, userIf->pollMask);
       if (skb_queue_len(&userIf->packetQueue) >= (*userIf->recvClusterCount)) {
          MonitorAction_SetBits(userIf->actionIntr, userIf->actionID);
       }
    }
+   spin_unlock_irqrestore(&userIf->packetQueue.lock, flags);
+
    wake_up(&userIf->waitQueue);
    return;
    
@@ -642,6 +698,7 @@ VNetUserIfRead(VNetPort    *port, // IN
    VNetUserIF *userIf = (VNetUserIF*)port->jack.private;
    struct sk_buff *skb;
    int ret;
+   unsigned long flags;
    DECLARE_WAITQUEUE(wait, current);
 
    add_wait_queue(&userIf->waitQueue, &wait);
@@ -654,13 +711,20 @@ VNetUserIfRead(VNetPort    *port, // IN
          break;
       }
       ret = -EAGAIN;
-      skb = skb_dequeue(&userIf->packetQueue);
 
+      spin_lock_irqsave(&userIf->packetQueue.lock, flags);
+      /*
+       * __skb_dequeue does not take any locks so must be used with
+       * appropriate locks held only.
+       */
+      skb = __skb_dequeue(&userIf->packetQueue);
       if (userIf->pollPtr) {
-         if (skb_queue_empty(&userIf->packetQueue)) {
-            *userIf->pollPtr &= ~userIf->pollMask;
+         if (!skb) {
+            /* List empty */
+            Atomic_And(userIf->pollPtr, ~userIf->pollMask);
          }
       }
+      spin_unlock_irqrestore(&userIf->packetQueue.lock, flags);
 
       if (skb != NULL || filp->f_flags & O_NONBLOCK) {
          break;
@@ -838,15 +902,24 @@ VNetUserIfIoctl(VNetPort      *port,  // IN
       
       if (!UP_AND_RUNNING(userIf->port.flags)) {
          struct sk_buff *skb;
+         unsigned long flags;
+         struct sk_buff_head *q = &userIf->packetQueue;
          
-         while ((skb = skb_dequeue(&userIf->packetQueue)) != NULL) {
+         while ((skb = skb_dequeue(q)) != NULL) {
             dev_kfree_skb(skb);
          }
          
+         spin_lock_irqsave(&q->lock, flags);
          if (userIf->pollPtr) {
-            /* Clear the pending bit as no packets are pending at this point. */
-            *userIf->pollPtr &= ~userIf->pollMask;
+            if (skb_queue_empty(q)) {
+               /*
+                * Clear the pending bit as no packets are pending at this
+                * point.
+                */
+               Atomic_And(userIf->pollPtr, ~userIf->pollMask);
+            }
          }
+         spin_unlock_irqrestore(&q->lock, flags);
       }
       break;
    case SIOCINJECTLINKSTATE:
@@ -932,7 +1005,7 @@ VNetUserIfSetUplinkState(VNetPort *port, uint8 linkUp)
    userIf = (VNetUserIF *)port->jack.private;
    hubJack = port->jack.peer;
 
-   if (hubJack == NULL) {
+   if (port->jack.state == FALSE || hubJack == NULL) {
       return -EINVAL;
    }
 

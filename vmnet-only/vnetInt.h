@@ -131,7 +131,9 @@ struct VNetJack {
    void          *private;     // private field for containing object
    int            index;       // private field for containing object
    VNetProcEntry *procEntry;   // private field for containing object
-   
+   Bool           state;       // TRUE for enabled
+   struct kref    kref;        // ref count
+
    void         (*free)(VNetJack *this);
    void         (*rcv)(VNetJack *this, struct sk_buff *skb);
    Bool         (*cycleDetect)(VNetJack *this, int generation);
@@ -183,7 +185,7 @@ int VNetConnect(VNetJack *jack1, VNetJack *jack2);
 
 VNetJack *VNetDisconnect(VNetJack *jack);
 
-void VNetSend(const VNetJack *jack, struct sk_buff *skb);
+void VNetSend(VNetJack *jack, struct sk_buff *skb);
 
 int VNetProc_MakeEntry(char *name, int mode, void *data,
                        VNetProcReadFn *fn, VNetProcEntry **ret);
@@ -300,7 +302,8 @@ VNetPortsChanged(VNetJack *jack) // IN:
 static INLINE int
 VNetIsBridged(VNetJack *jack) // IN: jack
 {
-   if (jack && jack->peer && jack->peer->isBridged) {
+   if (jack && jack->state && jack->peer && jack->peer->state &&
+       jack->peer->isBridged) {
       return jack->peer->isBridged(jack->peer);
    }
 
@@ -352,7 +355,7 @@ VNetFree(VNetJack *jack) // IN: jack
 static INLINE int
 VNetGetAttachedPorts(VNetJack *jack) // IN: jack
 {
-   if (jack && jack->peer) {
+   if (jack && jack->state && jack->peer && jack->peer->state) {
       return jack->peer->numPorts;
    }
    return 0;

@@ -129,7 +129,7 @@ VNetHubFindHubByID(uint8 idNum[VNET_PVN_ID_LEN]) // IN: PVN id to find
 {
    VNetHub *currHub = vnetHub;
    while (currHub && (currHub->hubType != HUB_TYPE_PVN ||
-		      memcmp(idNum, currHub->id.pvnID, sizeof idNum))) {
+		      memcmp(idNum, currHub->id.pvnID, sizeof currHub->id.pvnID))) {
       currHub = currHub->next;
    }
    return currHub;
@@ -312,7 +312,7 @@ VNetHubAlloc(Bool allocPvn, // IN: TRUE for PVN, FALSE for vnet
 
       if (allocPvn) {
 	 hub->hubType = HUB_TYPE_PVN;
-	 memcpy(hub->id.pvnID, id, sizeof id);
+	 memcpy(hub->id.pvnID, id, sizeof hub->id.pvnID);
 	 ++pvnInstance;
       } else {
 	 hub->hubType = HUB_TYPE_VNET;
@@ -536,6 +536,8 @@ VNetHubReceive(VNetJack       *this, // IN:
       jack = &hub->jack[i];
       if (jack->private &&   /* allocated */
           jack->peer &&      /* and connected */
+          jack->state &&     /* and enabled */
+          jack->peer->state && /* and enabled */
           jack->peer->rcv && /* and has a receiver */
           (jack != this)) {  /* and not a loop */
          clone = skb_clone(skb, GFP_ATOMIC);
@@ -580,7 +582,7 @@ VNetHubCycleDetect(VNetJack *this,
    hub->myGeneration = generation;
 
    for (i = 0; i < NUM_JACKS_PER_HUB; i++) {
-      if (hub->jack[i].private && (i != this->index)) {
+      if (hub->jack[i].private && hub->jack[i].state && (i != this->index)) {
          foundCycle = VNetCycleDetect(hub->jack[i].peer, generation);
          if (foundCycle) {
             return TRUE;
@@ -636,7 +638,8 @@ VNetHubPortsChanged(VNetJack *this)
             }
          } else {
             hub->jack[i].numPorts = new;
-            VNetPortsChanged(hub->jack[i].peer);
+            if (hub->jack[i].state)
+               VNetPortsChanged(hub->jack[i].peer);
          }
       }
    }

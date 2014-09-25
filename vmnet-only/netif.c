@@ -221,7 +221,7 @@ VNetNetIf_Create(char *devName,  // IN:
       LOG(0, (KERN_NOTICE "%s: could not register network device\n",
           dev->name));
       retval = -ENODEV;
-      goto outFreeDev;
+      goto outRemoveProc;
    }
 
    *ret = &netIf->port;

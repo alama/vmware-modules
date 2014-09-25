@@ -176,6 +176,7 @@ static int VNetSwitchToDifferentPeer(VNetJack *jack, VNetJack *newPeer,
 				     Bool connectNewToPeer,
 				     struct file *filp, VNetPort *jackPort,
 				     VNetPort *newPeerPort);
+static void VNetKrefRelease(struct kref *kref);
 
 uint vnet_max_qlen = VNET_MAX_QLEN;
 module_param(vnet_max_qlen, uint, 0);
@@ -619,7 +620,7 @@ VNetFileOpOpen(struct inode  *inode, // IN: used to get hub number
 
    hubJack = VNetHub_AllocVnet(hubNum);
    if (!hubJack) {
-      VNetFree(&port->jack);
+      kref_put(&port->jack.kref, VNetKrefRelease);
       return -EBUSY;
    }
 
@@ -627,8 +628,8 @@ VNetFileOpOpen(struct inode  *inode, // IN: used to get hub number
    retval = VNetConnect(&port->jack, hubJack);
    if (retval) {
       mutex_unlock(&vnetStructureMutex);
-      VNetFree(&port->jack);
-      VNetFree(hubJack);
+      kref_put(&port->jack.kref, VNetKrefRelease);
+      kref_put(&hubJack->kref, VNetKrefRelease);
       return retval;
    }
 
@@ -681,8 +682,8 @@ VNetFileOpClose(struct inode  *inode, // IN: (unused)
    VNetRemovePortFromList(port);
    mutex_unlock(&vnetStructureMutex);
 
-   VNetFree(&port->jack);
-   VNetFree(peer);
+   kref_put(&port->jack.kref, VNetKrefRelease);
+   kref_put(&peer->kref, VNetKrefRelease);
 
    return 0;
 }
@@ -1316,7 +1317,7 @@ VNetSwitchToDifferentPeer(VNetJack *jack,              // IN: jack whose peer is
       mutex_unlock(&vnetStructureMutex);
 
       /* Free the new peer */
-      VNetFree(newPeer);
+      kref_put(&newPeer->kref, VNetKrefRelease);
       if (retval2) {
 	 // assert xxx redo this
 	 LOG(1, (KERN_NOTICE "/dev/vmnet: cycle on connect failure\n"));
@@ -1339,9 +1340,9 @@ VNetSwitchToDifferentPeer(VNetJack *jack,              // IN: jack whose peer is
 
    /* Connected to new peer, so dealloc the old peer */
    if (connectNewToPeerOfJack) {
-      VNetFree(jack);
+      kref_put(&jack->kref, VNetKrefRelease);
    } else {
-      VNetFree(oldPeer);
+      kref_put(&oldPeer->kref, VNetKrefRelease);
    }
 
    return 0;
@@ -1559,6 +1560,10 @@ VNetConnect(VNetJack *jack1, // IN: jack
    write_lock_irqsave(&vnetPeerLock, flags);
    jack1->peer = jack2;
    jack2->peer = jack1;
+   jack1->state = TRUE;
+   jack2->state = TRUE;
+   kref_init(&jack1->kref);
+   kref_init(&jack2->kref);
    write_unlock_irqrestore(&vnetPeerLock, flags);
 
    if (jack2->numPorts) {
@@ -1602,8 +1607,8 @@ VNetDisconnect(VNetJack *jack) // IN: jack
       write_unlock_irqrestore(&vnetPeerLock, flags);
       return NULL;
    }
-   jack->peer = NULL;
-   peer->peer = NULL;
+   jack->state = FALSE;
+   peer->state = FALSE;
    write_unlock_irqrestore(&vnetPeerLock, flags);
 
    if (peer->numPorts) {
@@ -1702,6 +1707,33 @@ VNetFreeInterfaceList()
 /*
  *----------------------------------------------------------------------
  *
+ * VNetKrefRelease --
+ *
+ *      Free the VNetJack if no reference.
+ *
+ * Results:
+ *      None.
+ *
+ * Side effects:
+ *      None.
+ *
+ *----------------------------------------------------------------------
+ */
+
+static void
+VNetKrefRelease(struct kref *kref)
+{
+   struct VNetJack *jack = container_of(kref, struct VNetJack, kref);
+
+   jack->state = FALSE;
+   jack->peer = NULL;
+   VNetFree(jack);
+}
+
+
+/*
+ *----------------------------------------------------------------------
+ *
  * VNetSend --
  *
  *      Send a packet through this jack. Note, the packet goes to the
@@ -1717,16 +1749,23 @@ VNetFreeInterfaceList()
  */
 
 void
-VNetSend(const VNetJack *jack, // IN: jack
+VNetSend(VNetJack *jack, // IN: jack
          struct sk_buff *skb)  // IN: packet
 {
+   VNetJack *peer;
+
    read_lock(&vnetPeerLock);
    if (jack && jack->peer && jack->peer->rcv) {
-      jack->peer->rcv(jack->peer, skb);
+      peer = jack->peer;
+      kref_get(&(peer->kref));
+      read_unlock(&vnetPeerLock);
+
+      peer->rcv(peer, skb);
+      kref_put(&(peer->kref), VNetKrefRelease);
    } else {
+      read_unlock(&vnetPeerLock);
       dev_kfree_skb(skb);
    }
-   read_unlock(&vnetPeerLock);
 }
 
 

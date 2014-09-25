@@ -34,66 +34,62 @@
 
 
 /*
- *----------------------------------------------------------------------
+ *-----------------------------------------------------------------------------
  *
  * MemDefaults_CalcMaxLockedPages --
  *
- *    Calculate the rough estimate of the maximum amount of memory
- *    that can be locked based on the size of host memory as supplied
- *    in Pages.
+ *      Calculate the rough estimate of the maximum amount of memory
+ *      that can be locked (total for the kernel, all VMs, and other apps),
+ *      based on the size of host memory as supplied in pages.
  *
  * Results:
- *    The estimated maximum memory that can be locked in Pages.
+ *      The estimated maximum memory that can be locked in pages.
  *
  * Side effects:
- *    None
+ *      None
  *
- *----------------------------------------------------------------------
+ *-----------------------------------------------------------------------------
  */
 
 static INLINE unsigned
 MemDefaults_CalcMaxLockedPages(unsigned hostPages)  // IN:
 {
-   APPLE_ONLY(unsigned reservedPages;)
+   unsigned reservedPages;
 
-   /*
-    * Once the amount of host memory crosses the lower bound give up.
-    */
-   if (hostPages < MEMDEFAULTS_MIN_HOST_PAGES) {
-      return 0;
-   }
 #if defined(__APPLE__)
    /*
-    * Reserve 20% of host memory + 820 MB or 4GB, whichever is lower,
-    * for Mac OS and other apps.
+    * Reserve (25% of the host memory + 512 MB) or 4 GB, whichever is lower.
+    * 4 GB hosts perform poorly with less than 1.5 GB reserved, and large
+    * memory hosts (>= 16 GB) may want to use more than 75% for VMs.
     */
-   reservedPages = MIN(GBYTES_2_PAGES(4),
-                       RatioOf(hostPages, 2, 10) + MBYTES_2_PAGES(820));
-   return hostPages > reservedPages ? hostPages - reservedPages : 0;
+   reservedPages = MIN((hostPages / 4) + MBYTES_2_PAGES(512),
+                       GBYTES_2_PAGES(4));
 #elif defined(_WIN32)
-   return hostPages - MAX(hostPages / 4, MEMDEFAULTS_MIN_HOST_PAGES);
+   reservedPages = MAX(hostPages / 4, MEMDEFAULTS_MIN_HOST_PAGES);
 #else  // Linux
-   return hostPages - MAX(hostPages / 8, MEMDEFAULTS_MIN_HOST_PAGES);
+   reservedPages = MAX(hostPages / 8, MEMDEFAULTS_MIN_HOST_PAGES);
 #endif
+
+   return hostPages > reservedPages ? hostPages - reservedPages : 0;
 }
 
 
 /*
- *----------------------------------------------------------------------
+ *-----------------------------------------------------------------------------
  *
  * MemDefaults_CalcMaxLockedMBs --
  *
- *    Calculate the rough estimate of the maximum amount of memory
- *    that can be locked based on the size of host memory as supplied
- *    in MBytes.
+ *      Calculate the rough estimate of the maximum amount of memory
+ *      that can be locked based on the size of host memory as supplied
+ *      in MBytes.
  *
  * Results:
- *    The estimated maximum memory that can be locked in MBytes.
+ *      The estimated maximum memory that can be locked in MBytes.
  *
  * Side effects:
- *    None
+ *      None
  *
- *----------------------------------------------------------------------
+ *-----------------------------------------------------------------------------
  */
 
 static INLINE uint32
@@ -105,22 +101,22 @@ MemDefaults_CalcMaxLockedMBs(uint32 hostMem)  // IN:
 
 
 /*
- *----------------------------------------------------------------------
+ *-----------------------------------------------------------------------------
  *
  * MemDefaults_CalcMinReservedMBs --
  *
- *    Provide a lower bound on the user as to the minimum amount
- *    of memory to lock based on the size of host memory. This
- *    threshold might be crossed as a result of the user limiting
- *    the amount of memory consumed by all VMs.
+ *      Provide a lower bound on the user as to the minimum amount
+ *      of memory to lock based on the size of host memory. This
+ *      threshold might be crossed as a result of the user limiting
+ *      the amount of memory consumed by all VMs.
  *
  * Results:
- *    The minimum locked memory requirement in MBytes.
+ *      The minimum locked memory requirement in MBytes.
  *
  * Side effects:
- *    None
+ *      None
  *
- *----------------------------------------------------------------------
+ *-----------------------------------------------------------------------------
  */
 
 static INLINE uint32
