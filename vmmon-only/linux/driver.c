@@ -128,7 +128,22 @@ static struct vm_operations_struct vmuser_mops = {
 #endif
 };
 
-static struct file_operations vmuser_fops;
+static struct file_operations vmuser_fops = {
+   .owner = THIS_MODULE,
+   .poll = LinuxDriverPoll,
+#ifdef HAVE_UNLOCKED_IOCTL
+   .unlocked_ioctl = LinuxDriver_UnlockedIoctl,
+#else
+   .ioctl = LinuxDriver_Ioctl,
+#endif
+#ifdef HAVE_COMPAT_IOCTL
+   .compat_ioctl = LinuxDriver_UnlockedIoctl,
+#endif
+   .open = LinuxDriver_Open,
+   .release = LinuxDriver_Close,
+   .mmap = LinuxDriverMmap
+};
+
 static struct timer_list tscTimer;
 
 /*
@@ -306,27 +321,6 @@ init_module(void)
 #ifdef POLLSPINLOCK
    spin_lock_init(&linuxState.pollListLock);
 #endif
-
-   /*
-    * Initialize the file_operations structure. Because this code is always
-    * compiled as a module, this is fine to do it here and not in a static
-    * initializer.
-    */
-
-   memset(&vmuser_fops, 0, sizeof vmuser_fops);
-   vmuser_fops.owner = THIS_MODULE;
-   vmuser_fops.poll = LinuxDriverPoll;
-#ifdef HAVE_UNLOCKED_IOCTL
-   vmuser_fops.unlocked_ioctl = LinuxDriver_UnlockedIoctl;
-#else
-   vmuser_fops.ioctl = LinuxDriver_Ioctl;
-#endif
-#ifdef HAVE_COMPAT_IOCTL
-   vmuser_fops.compat_ioctl = LinuxDriver_UnlockedIoctl;
-#endif
-   vmuser_fops.open = LinuxDriver_Open;
-   vmuser_fops.release = LinuxDriver_Close;
-   vmuser_fops.mmap = LinuxDriverMmap;
 
 #ifdef VMX86_DEVEL
    devel_init_module();

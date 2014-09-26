@@ -165,7 +165,22 @@ static long  VNetFileOpUnlockedIoctl(struct file * filp,
                                      unsigned int iocmd, unsigned long ioarg);
 #endif
 
-static struct file_operations vnetFileOps;
+static struct file_operations vnetFileOps = {
+   .owner = THIS_MODULE,
+   .read = VNetFileOpRead,
+   .write = VNetFileOpWrite,
+   .poll = VNetFileOpPoll,
+#ifdef HAVE_UNLOCKED_IOCTL
+   .unlocked_ioctl = VNetFileOpUnlockedIoctl,
+#else
+   .ioctl = VNetFileOpIoctl,
+#endif
+#ifdef HAVE_COMPAT_IOCTL
+   .compat_ioctl = VNetFileOpUnlockedIoctl,
+#endif
+   .open = VNetFileOpOpen,
+   .release = VNetFileOpClose
+};
 
 /*
  * Utility functions
@@ -481,28 +496,6 @@ init_module(void)
    if (retval) {
       goto err_proto;
    }
-
-   /*
-    * Initialize the file_operations structure. Because this code is always
-    * compiled as a module, this is fine to do it here and not in a static
-    * initializer.
-    */
-
-   memset(&vnetFileOps, 0, sizeof vnetFileOps);
-   vnetFileOps.owner = THIS_MODULE;
-   vnetFileOps.read = VNetFileOpRead;
-   vnetFileOps.write = VNetFileOpWrite;
-   vnetFileOps.poll = VNetFileOpPoll;
-#ifdef HAVE_UNLOCKED_IOCTL
-   vnetFileOps.unlocked_ioctl = VNetFileOpUnlockedIoctl;
-#else
-   vnetFileOps.ioctl = VNetFileOpIoctl;
-#endif
-#ifdef HAVE_COMPAT_IOCTL
-   vnetFileOps.compat_ioctl = VNetFileOpUnlockedIoctl;
-#endif
-   vnetFileOps.open = VNetFileOpOpen;
-   vnetFileOps.release = VNetFileOpClose;
 
    retval = register_chrdev(VNET_MAJOR_NUMBER, "vmnet", &vnetFileOps);
    if (retval) {
