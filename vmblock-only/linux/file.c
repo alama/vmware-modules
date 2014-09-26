@@ -38,6 +38,7 @@ typedef u64 inode_num_t;
 typedef ino_t inode_num_t;
 #endif
 
+#if LINUX_VERSION_CODE < KERNEL_VERSION(3, 11, 0)
 /* Specifically for our filldir_t callback */
 typedef struct FilldirInfo {
    filldir_t filldir;
@@ -78,6 +79,7 @@ Filldir(void *buf,              // IN: Dirent buffer passed from FileOpReaddir
 }
 
 
+#endif
 /* File operations */
 
 /*
@@ -164,6 +166,7 @@ FileOpOpen(struct inode *inode,  // IN
  *----------------------------------------------------------------------------
  */
 
+#if LINUX_VERSION_CODE < KERNEL_VERSION(3, 11, 0)
 static int
 FileOpReaddir(struct file *file,  // IN
               void *dirent,       // IN
@@ -193,6 +196,33 @@ FileOpReaddir(struct file *file,  // IN
 
    return ret;
 }
+#else
+static int
+FileIterate(struct file *file,  // IN
+            struct dir_context *ctx)  // IN
+{
+   int ret;
+   struct file *actualFile;
+
+   if (!file) {
+      Warning("FileOpReaddir: invalid args from kernel\n");
+      return -EINVAL;
+   }
+
+   actualFile = file->private_data;
+   if (!actualFile) {
+      Warning("FileOpReaddir: no actual file found\n");
+      return -EINVAL;
+   }
+
+   /* Ricky Wong Yung Fei:
+    * Manipulation of pos is now handled internally by iterate_dir().
+    */
+   ret = iterate_dir(actualFile, ctx);
+
+   return ret;
+}
+#endif
 
 
 /*
@@ -237,7 +267,11 @@ FileOpRelease(struct inode *inode, // IN
 
 
 struct file_operations RootFileOps = {
+#if LINUX_VERSION_CODE < KERNEL_VERSION(3, 11, 0)
    .readdir = FileOpReaddir,
+#else
+   .iterate = FileIterate,
+#endif
    .open    = FileOpOpen,
    .release = FileOpRelease,
 };
