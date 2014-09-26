@@ -293,7 +293,7 @@ ExecuteBlockOp(const char __user *buf,                // IN: buffer with name
 
    retval = i < 0 ? -EINVAL : blockOp(name, blocker);
 
-   putname(name);
+   __putname(name);
 
    return retval;
 }
