@@ -21,7 +21,7 @@ CC_OPTS += -DVMCI
 
 INCLUDE += -I$(SRCROOT)/shared -I$(SRCROOT)/common -I$(SRCROOT)/linux
 
-EXTRA_CFLAGS := $(CC_OPTS) $(INCLUDE)
+EXTRA_CFLAGS := $(CC_OPTS) $(INCLUDE) $(LINUXINCLUDE)
 
 obj-m += $(DRIVER).o
 

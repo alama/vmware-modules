@@ -25,7 +25,7 @@ INCLUDE += -I$(SRCROOT)/include
 INCLUDE += -I$(SRCROOT)/linux
 INCLUDE += -I$(SRCROOT)/common
 
-EXTRA_CFLAGS := $(CC_OPTS) $(INCLUDE)
+EXTRA_CFLAGS := $(CC_OPTS) $(INCLUDE) $(LINUXINCLUDE)
 EXTRA_CFLAGS += $(call vm_check_build, $(AUTOCONF_DIR)/netcreate_num_params.c, -DVMW_NETCREATE_KERNARG, )
 
 
