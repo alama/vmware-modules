@@ -78,6 +78,7 @@
 #include <linux/kthread.h>
 #include <linux/wait.h>
 
+#include <asm/apic.h>
 
 #include "vmware.h"
 #include "x86apic.h"
