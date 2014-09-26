@@ -51,6 +51,7 @@ sys_ioctl(unsigned int fd, unsigned int cmd, unsigned long arg);
 #include "compat_slab.h"
 #include "compat_uaccess.h"
 #include "compat_version.h"
+#include "compat_cred.h"
 
 #if LINUX_VERSION_CODE < KERNEL_VERSION(2, 6, 9)
 #  error "Linux kernels before 2.6.9 are not supported."
@@ -737,7 +738,7 @@ LinuxDriver_Ioctl(struct inode *inode,
          goto init_release;
       }
 
-      user = current_uid();
+      user = CURRENT_UID();
       retval = VMCIContext_InitContext(initBlock.cid, initBlock.flags,
                                        0 /* Unused */, vmciLinux->userVersion,
                                        &user, &vmciLinux->context);

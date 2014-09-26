@@ -2869,7 +2869,7 @@ __VSockVmciCreate(struct net *net,       // IN: Network namespace
       vsk->connectTimeout = psk->connectTimeout;
    } else {
       vsk->trusted = capable(CAP_NET_ADMIN);
-      vsk->owner = current_uid();
+      vsk->owner = CURRENT_UID();
       vsk->queuePairSize = VSOCK_DEFAULT_QP_SIZE;
       vsk->queuePairMinSize = VSOCK_DEFAULT_QP_SIZE_MIN;
       vsk->queuePairMaxSize = VSOCK_DEFAULT_QP_SIZE_MAX;

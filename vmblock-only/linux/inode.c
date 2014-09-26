@@ -36,7 +36,7 @@
 
 /* Inode operations */
 static struct dentry *InodeOpLookup(struct inode *dir,
-                                    struct dentry *dentry, struct nameidata *nd);
+                                    struct dentry *dentry, unsigned int flags);
 static int InodeOpReadlink(struct dentry *dentry, char __user *buffer, int buflen);
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 13)
 static void *InodeOpFollowlink(struct dentry *dentry, struct nameidata *nd);
@@ -75,7 +75,7 @@ static struct inode_operations LinkInodeOps = {
 static struct dentry *
 InodeOpLookup(struct inode *dir,      // IN: parent directory's inode
               struct dentry *dentry,  // IN: dentry to lookup
-              struct nameidata *nd)   // IN: lookup intent and information
+              unsigned int flags)     // IN: lookup intent and information
 {
    char *filename;
    struct inode *inode;
@@ -135,7 +135,8 @@ InodeOpLookup(struct inode *dir,      // IN: parent directory's inode
    inode->i_size = INODE_TO_IINFO(inode)->nameLen;
    inode->i_version = 1;
    inode->i_atime = inode->i_mtime = inode->i_ctime = CURRENT_TIME;
-   inode->i_uid = inode->i_gid = 0;
+   i_uid_write(inode, 0);
+   i_gid_write(inode, 0);
    inode->i_op = &LinkInodeOps;
 
    d_add(dentry, inode);
@@ -221,7 +222,7 @@ InodeOpFollowlink(struct dentry *dentry,  // IN : dentry of symlink
       goto out;
    }
 
-   ret = vfs_follow_link(nd, iinfo->name);
+   nd_set_link(nd, iinfo->name);
 
 out:
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 13)

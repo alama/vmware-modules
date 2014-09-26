@@ -846,7 +846,7 @@ VNetFileOpIoctl(struct inode   *inode, // IN:
                 unsigned long   ioarg) // IN:
 {
    VNetPort *port = (VNetPort*)filp->private_data;
-   VNetJack *hubJack;
+   VNetJack *hubJack = NULL;
    VNetPort *new;
    char name[32];
    int retval;

@@ -32,7 +32,7 @@
 #include "block.h"
 
 
-static int DentryOpRevalidate(struct dentry *dentry, struct nameidata *nd);
+static int DentryOpRevalidate(struct dentry *dentry, unsigned int flags);
 
 struct dentry_operations LinkDentryOps = {
    .d_revalidate = DentryOpRevalidate,
@@ -60,7 +60,7 @@ struct dentry_operations LinkDentryOps = {
 
 static int
 DentryOpRevalidate(struct dentry *dentry,  // IN: dentry revalidating
-                   struct nameidata *nd)   // IN: lookup flags & intent
+                   unsigned int flags)     // IN: lookup flags & intent
 {
    VMBlockInodeInfo *iinfo;
    struct nameidata actualNd;
@@ -101,7 +101,7 @@ DentryOpRevalidate(struct dentry *dentry,  // IN: dentry revalidating
    if (actualDentry &&
        actualDentry->d_op &&
        actualDentry->d_op->d_revalidate) {
-      return actualDentry->d_op->d_revalidate(actualDentry, nd);
+      return actualDentry->d_op->d_revalidate(actualDentry, flags);
    }
 
    if (compat_path_lookup(iinfo->name, 0, &actualNd)) {

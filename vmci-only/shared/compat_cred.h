@@ -35,6 +35,14 @@
 #define current_fsgid() (current->fsgid)
 #endif
 
+#ifdef CONFIG_UIDGID_STRICT_TYPE_CHECKS
+#define CURRENT_UID() (__kuid_val(current_uid()))
+#define CURRENT_GID() (__kgid_val(current_gid()))
+#else
+#define CURRENT_UID() (current_uid())
+#define CURRENT_GID() (current_gid())
+#endif
+
 #if !defined(cap_set_full)
 /* cap_set_full was removed in kernel version 3.0-rc4. */
 #define cap_set_full(_c) do { (_c) = CAP_FULL_SET; } while (0)

@@ -290,7 +290,7 @@ ExecuteBlockOp(const char __user *buf,                // IN: buffer with name
    int i;
    int retval;
 
-   name = getname(buf);
+   name = (char*) getname(buf)->name;
    if (IS_ERR(name)) {
       return PTR_ERR(name);
    }
