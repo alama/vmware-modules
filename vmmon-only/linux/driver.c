@@ -1332,7 +1332,7 @@ LinuxDriverReadTSC(void *data,   // OUT: TSC values
  *-----------------------------------------------------------------------------
  */
 
-__attribute__((always_inline)) static Bool
+INLINE_SINGLE_CALLER static Bool
 LinuxDriverSyncReadTSCs(uint64 *delta) // OUT: TSC max - TSC min
 {
    TSCDelta tscDelta;
