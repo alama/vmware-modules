@@ -164,7 +164,11 @@ VSockVmciHandleWrote(struct sock *sk,            // IN
                      struct sockaddr_vm *dst,    // IN: unused
                      struct sockaddr_vm *src)    // IN: unused
 {
+#if LINUX_VERSION_CODE <= KERNEL_VERSION(3, 14, 99)
    sk->sk_data_ready(sk, 0);
+#else
+   sk->sk_data_ready(sk);
+#endif
 }
 
 
@@ -566,7 +570,12 @@ VSockVmciNotifyPktRecvPostDequeue(struct sock *sk,               // IN
       }
 
       /* See the comment in VSockVmciNotifyPktSendPostEnqueue */
+
+#if LINUX_VERSION_CODE <= KERNEL_VERSION(3, 14, 99)
       sk->sk_data_ready(sk, 0);
+#else
+      sk->sk_data_ready(sk);
+#endif
    }
 
    return err;
