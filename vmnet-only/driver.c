@@ -64,13 +64,6 @@ extern int VNetBridge_Create(char *devName, uint32 flags, VNetJack *hubJack,
                              VNetPort **ret);
 extern int VNetUserListener_Create(uint32 classMask, VNetJack *hubJack, VNetPort **ret);
 
-#ifdef CONFIG_NETFILTER
-/*
- * Filter routine from filter.c
- */
-extern int VNetFilter_HandleUserCall(VNet_RuleHeader *ruleHeader, unsigned long ioarg);
-extern void VNetFilter_Shutdown(void);
-#endif
 
 /*
  *  Structure for cycle detection of host interfaces.  This
@@ -552,9 +545,6 @@ cleanup_module(void)
    unregister_chrdev(VNET_MAJOR_NUMBER, "vmnet");
    VNetProtoUnregister();
    VNetProc_Cleanup();
-#ifdef CONFIG_NETFILTER
-   VNetFilter_Shutdown();
-#endif
 }
 
 
@@ -852,9 +842,6 @@ VNetFileOpIoctl(struct inode   *inode, // IN:
    int retval;
    VNet_SetMacAddrIOCTL macAddr;
    VNet_Bind newNetwork;
-#ifdef CONFIG_NETFILTER
-   VNet_RuleHeader ruleHeader;
-#endif
    VNet_BridgeParams bridgeParams;
 
    if (!port) {
@@ -1008,40 +995,8 @@ VNetFileOpIoctl(struct inode   *inode, // IN:
       break;
 
    case SIOCSFILTERRULES:
-#ifdef CONFIG_NETFILTER
-      if (copy_from_user(&ruleHeader, (void *)ioarg, sizeof ruleHeader)) {
-         return -EFAULT;
-      }
-
-      /* Verify the call is for a known type */
-      if (ruleHeader.type < VNET_FILTER_CMD_MIN ||
-          ruleHeader.type > VNET_FILTER_CMD_MAX) {
-         LOG(1, (KERN_NOTICE "/dev/vmnet: invalid filter command\n"));
-         return -EINVAL;
-      }
-
-      /*
-       * Version check should be done on a per-sub-command basis, but every
-       * sub-command is currently using 1, so for now we globally check for
-       * all sub-commands here in one place.
-       */
-      if (ruleHeader.ver != 1) {
-         LOG(1, (KERN_NOTICE "/dev/vmnet: invalid version for "
-                 "filter command\n"));
-         return -EINVAL;
-      }
-
-      /*
-       * Dispatch the sub-command.
-       */
-      mutex_lock(&vnetIoctlMutex);
-      retval = VNetFilter_HandleUserCall(&ruleHeader, ioarg);
-      mutex_unlock(&vnetIoctlMutex);
-      break;
-#else
       LOG(0, (KERN_NOTICE "/dev/vmnet: kernel doesn't support netfilter\n"));
       return -EINVAL;
-#endif
 
    case SIOCGBRSTATUS:
       {
