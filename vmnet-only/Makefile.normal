@@ -52,7 +52,7 @@ CC_OPTS += $(call vm_check_build, $(SRCROOT)/skblin.c, -DVMW_SKB_LINEARIZE_2618,
 
 CFLAGS := -O $(CC_WARNINGS) $(CC_OPTS) $(INCLUDE) $(GLOBAL_DEFS)
 
-OBJS := driver.o hub.o userif.o netif.o bridge.o filter.o procfs.o smac_compat.o \
+OBJS := driver.o hub.o userif.o netif.o bridge.o procfs.o smac_compat.o \
         smac.o vnetEvent.o vnetUserListener.o
 
 LIBS :=

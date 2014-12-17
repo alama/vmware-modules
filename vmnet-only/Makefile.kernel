@@ -27,7 +27,7 @@ EXTRA_CFLAGS += $(call vm_check_build, $(SRCROOT)/skblin.c,  -DVMW_SKB_LINEARIZE
 
 obj-m += $(DRIVER).o
 
-$(DRIVER)-y := driver.o hub.o userif.o netif.o bridge.o filter.o procfs.o smac_compat.o \
+$(DRIVER)-y := driver.o hub.o userif.o netif.o bridge.o procfs.o smac_compat.o \
 	       smac.o vnetEvent.o vnetUserListener.o
 
 ####
