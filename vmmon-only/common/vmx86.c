@@ -435,8 +435,7 @@ Vmx86RegisterVMOnList(VMDriver *vm) // IN
 
    for (vmp = &vmDriverList; *vmp != NULL; vmp = &(*vmp)->nextDriver) {
       if (*vmp == vm) {
-         Warning("VM %p already registered on the list of VMs.\n", vm);
-
+         Warning("VM already registered on the list of VMs.\n");
          return;
       }
    }
@@ -473,8 +472,7 @@ Vmx86DeleteVMFromList(VMDriver *vm)
    ASSERT(HostIF_GlobalLockIsHeld());
    for (vmp = &vmDriverList; *vmp != vm; vmp = &(*vmp)->nextDriver) {
       if (*vmp == NULL) {
-         Warning("VM %p is not on the list of registered VMs.\n", vm);
-
+         Warning("VM is not on the list of registered VMs.\n");
          return;
       }
    }

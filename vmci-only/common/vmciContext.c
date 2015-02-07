@@ -2208,7 +2208,7 @@ VMCI_EXPORT_SYMBOL(vmci_is_context_owner)
 #if defined(linux) && !defined(VMKERNEL)
 int
 vmci_is_context_owner(VMCIId contextID,   // IN
-                      uid_t uid)          // IN
+                      VMCIHostUser uid)          // IN
 {
    int isOwner = 0;
 
@@ -2216,7 +2216,7 @@ vmci_is_context_owner(VMCIId contextID,   // IN
       VMCIContext *context = VMCIContext_Get(contextID);
       if (context) {
          if (context->validUser) {
-            if (VMCIHost_CompareUser((VMCIHostUser *)&uid,
+            if (VMCIHost_CompareUser(&uid,
                                      &context->user) == VMCI_SUCCESS) {
                isOwner = 1;
             }

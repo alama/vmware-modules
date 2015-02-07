@@ -91,7 +91,11 @@ VMCIId vmci_get_context_id(void);
 
 #if defined(linux) && !defined(VMKERNEL)
 /* Returned value is a bool, 0 for false, 1 for true. */
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 5, 0)
+int vmci_is_context_owner(VMCIId contextID, kuid_t uid);
+#else
 int vmci_is_context_owner(VMCIId contextID, uid_t uid);
+#endif
 #else // !linux || VMKERNEL
 /* Returned value is a VMCI error code. */
 int vmci_is_context_owner(VMCIId contextID, void *hostUser);
