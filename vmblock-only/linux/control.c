@@ -290,9 +290,15 @@ ExecuteBlockOp(const char __user *buf,                // IN: buffer with name
    int i;
    int retval;
 
-   name = (char*) getname(buf)->name;
+   name = __getname();
    if (IS_ERR(name)) {
       return PTR_ERR(name);
+   }
+
+   i = strncpy_from_user(name, buf, PATH_MAX);
+   if (i < 0 || i == PATH_MAX) {
+      __putname(name);
+      return -EINVAL;
    }
 
    for (i = strlen(name) - 1; i >= 0 && name[i] == '/'; i--) {
