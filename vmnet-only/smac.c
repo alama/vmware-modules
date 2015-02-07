@@ -21,7 +21,7 @@
  *
  *      This file defines functionality that allows the
  *      bridge to be used across links that do
- *      not support promiscuous mode, or to not provide the
+ *      not support promiscuous mode, or do not provide the
  *      ability to transmit ethernet frames whose MAC source
  *      address does not match the hardware's MAC address.
  *
@@ -104,11 +104,15 @@
 #undef ASSERT
 
 #ifdef DBG
-#define VNETKdPrint(a)         (SMACL_Print a)
-#define ASSERT(a) do {if (!(a)) {VNETKdPrint(("ASSERT FAILED: "#a));}} while(0)
+#   if defined __APPLE__
+#      define VNETKdPrint(a)         (Log a)
+#   else // __linux__
+#      define VNETKdPrint(a)         (SMACL_Print a)
+#   endif
+#   define ASSERT(a) do {if (!(a)) {VNETKdPrint(("ASSERT FAILED: "#a));}} while(0)
 #else
-#define VNETKdPrint(a)         do { } while (0)
-#define ASSERT(a)              do { } while (0)
+#   define VNETKdPrint(a)         do { } while (0)
+#   define ASSERT(a)              do { } while (0)
 #endif
 
 #define VNETKdPrintCall(a)     VNETKdPrint((MODULE_NAME "Calling    : %s\n", a))

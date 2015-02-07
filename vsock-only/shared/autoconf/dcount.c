@@ -1,5 +1,5 @@
 /*********************************************************
- * Copyright (C) 2002 VMware, Inc. All rights reserved.
+ * Copyright (C) 2014 VMware, Inc. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License as published by the
@@ -16,32 +16,28 @@
  *
  *********************************************************/
 
-#ifndef __COMPAT_CRED_H__
-#   define __COMPAT_CRED_H__
+#include "compat_version.h"
+#include "compat_autoconf.h"
 
+#if LINUX_VERSION_CODE < KERNEL_VERSION(3, 11, 0)
+#include <linux/dcache.h>
 
 /*
- * Include linux/cred.h via linux/sched.h - it is not nice, but
- * as cpp does not have #ifexist...
+ * After 3.11.0, the dentry d_count field was removed. Red Hat
+ * backported this behavior into a 3.10.0 kernel.
+ *
+ * This test will fail on a kernel with such a patch.
  */
-#include <linux/sched.h>
+void test(void)
+{
+   struct dentry dentry;
 
-#if !defined(current_fsuid) && LINUX_VERSION_CODE < KERNEL_VERSION(2, 6, 29)
-#define current_uid() (current->uid)
-#define current_euid() (current->euid)
-#define current_fsuid() (current->fsuid)
-#define current_gid() (current->gid)
-#define current_egid() (current->egid)
-#define current_fsgid() (current->fsgid)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 38)
+   dentry.d_count = 1;
+#else
+   atomic_set(&dentry.d_count, 1);
 #endif
-
-#if !defined(cap_set_full)
-/* cap_set_full was removed in kernel version 3.0-rc4. */
-#define cap_set_full(_c) do { (_c) = CAP_FULL_SET; } while (0)
+}
+#else
+#error "This test intentionally fails on 3.11.0 or newer kernels."
 #endif
-
-#if !defined(GLOBAL_ROOT_UID)
-#define GLOBAL_ROOT_UID (0)
-#endif
-
-#endif /* __COMPAT_CRED_H__ */

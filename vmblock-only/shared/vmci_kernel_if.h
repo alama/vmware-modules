@@ -110,7 +110,11 @@
   typedef wait_queue_head_t VMCIEvent;
   typedef struct semaphore VMCIMutex;
   typedef PPN *VMCIPpnList; /* List of PPNs in produce/consume queue. */
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 5, 0)
+  typedef kuid_t VMCIHostUser;
+#else
   typedef uid_t VMCIHostUser;
+#endif
   typedef VA64 VMCIQPGuestMem;
 #elif defined(__APPLE__)
   typedef IOLock *VMCILock;

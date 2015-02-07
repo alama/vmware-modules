@@ -420,11 +420,13 @@ int VMCIHost_CompareUser(VMCIHostUser *user1,
       return VMCI_ERROR_INVALID_ARGS;
    }
 
-   if (*user1 == *user2) {
-      return VMCI_SUCCESS;
-   } else {
-      return VMCI_ERROR_GENERIC;
-   }
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 5, 0)
+#  define vmw_uid_eq(a, b) uid_eq(a, b)
+#else
+#  define vmw_uid_eq(a, b) ((a) == (b))
+#endif
+
+   return vmw_uid_eq(*user1, *user2) ? VMCI_SUCCESS : VMCI_ERROR_GENERIC;
 }
 
 
