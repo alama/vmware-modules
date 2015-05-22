@@ -1,5 +1,5 @@
 /*********************************************************
- * Copyright (C) 2010 VMware, Inc. All rights reserved.
+ * Copyright (C) 2010-2013 VMware, Inc. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License as published by the
@@ -19,8 +19,8 @@
 /*
  * pagelist.h -- 
  *
- *      Definitions of constants/structs used in communicating 
- *	page info. between VMKernel/VMMon and VMM.
+ *      Definitions of operations on BPNs used in communicating page info
+ *	between VMKernel/VMX and VMM.
  */
 
 #ifndef	_PAGELIST_H
@@ -36,28 +36,22 @@
 #include "vm_assert.h"
 
 /*
- * PageList is used for communicating sets of BPNs/MPNs between the monitor
- * and platform.  The most common use is for passing sets of pages to be 
- * shared, remapped, or swapped.
+ * Sets of pages are passed between the monitor and the platform to be 
+ * shared, invalidated, remapped, or swapped.
  *
  * The upper bit of each (tagged) BPN is used to encode specific state 
  * about each page:
  *
  *     bit 31: the entry has been voided/rejected
  *
- * The page-list structure is sized so that it fits in a 4KB page.
+ * A set is sized so that it fits in a 4KB page.
  */
 
-#define PAGELIST_MAX     (PAGE_SIZE / (sizeof(BPN) + sizeof(MPN)))
+#define PAGELIST_MAX     512
 #define PAGELIST_VOID    (1 << 31)
 
-typedef struct PageList {
-   BPN bpnList[PAGELIST_MAX];
-   MPN mpnList[PAGELIST_MAX];
-} PageList;
-
 MY_ASSERTS(PAGELISTDEFS, 
-           ASSERT_ON_COMPILE(sizeof(PageList) <= PAGE_SIZE);)
+           ASSERT_ON_COMPILE(PAGELIST_MAX * sizeof(BPN) <= PAGE_SIZE);)
 
 static INLINE BPN
 PageList_VoidBPN(BPN bpn) 
@@ -75,6 +69,23 @@ static INLINE Bool
 PageList_IsVoid(BPN taggedBPN)
 {
    return (taggedBPN & PAGELIST_VOID) != 0;
+}
+
+/*
+ * This function inspects the set of BPN between entry [0,i) in the page list
+ * and returns TRUE if any of them matches the provided BPN.
+ */
+static INLINE Bool
+PageList_IsBPNDup(const BPN *bpnList, unsigned i, BPN bpn)
+{
+   unsigned k;
+   ASSERT(!PageList_IsVoid(bpn));
+   for (k = 0; k < i; k++) {
+      if (PageList_BPN(bpnList[k]) == bpn) {
+         return TRUE;
+      }
+   }
+   return FALSE;
 }
 
 #endif

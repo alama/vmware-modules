@@ -78,7 +78,7 @@
 #define APICR_INITCNT     0x38
 #define APICR_CURCNT      0x39
 #define APICR_DIVIDER     0x3e
-#define APICR_SELFIPI     0x3f	// X2 APIC only	
+#define APICR_SELFIPI     0x3f // X2 APIC only
 #define APICR_EXTFEATURE  0x40
 #define APICR_EXTLVT      0x50
 
@@ -103,6 +103,7 @@
 #define APIC_SVR_VECTOR       0x000000ff
 #define APIC_SVR_APICENABLE   0x00000100
 #define APIC_SVR_FOCUSCHECK   0x00000200
+#define APIC_SVR_X2_RESERVED  0xffffee00
 
 #define APIC_LVT_MASK         0x10000
 #define APIC_LVT_DELVMODE_NMI 0x400
@@ -151,11 +152,14 @@
 #define XAPIC_ID_MASK         0xff000000
 #define X2APIC_ID_BITS        0xffffffff
 #define APIC_ID_SHIFT         24
-#define APIC_LDR_BITS	      0xff000000
-#define APIC_LDR_SHIFT	      24
+#define APIC_LDR_BITS         0xff000000
+#define APIC_LDR_SHIFT        24
 
 #define APIC_DIVIDER_BY_1     0x0000000b
 #define APIC_DIVIDER_RESERVED 0xfffffff4
+
+/* APIC illegal vectors */
+#define APIC_MIN_LEGAL_VECTOR 16
 
 /* APIC delivery modes */
 #define APIC_DELMODE_FIXED    0
@@ -197,7 +201,6 @@
 #define X2APIC_ICR_DEST_OFFSET      32
 
 #define APIC_ICRLO_RESERVED         0xfff32000
-#define APIC_ICR_X2_RESERVED        0xfff33000
 #define APIC_ICRLO_DEST_MASK        0x000c0000
 #define APIC_ICRLO_DEST_OFFSET      18
 #define APIC_ICRLO_TRIGGER_MASK     0x00008000
@@ -211,7 +214,7 @@
 #define APIC_ICRLO_DELMODE_MASK     0x00000700
 #define APIC_ICRLO_DELMODE_OFFSET   8
 #define APIC_ICRLO_VECTOR_MASK      0x000000ff
-#define APIC_ICRLO_VECTOR_OFFSET	   0
+#define APIC_ICRLO_VECTOR_OFFSET    0
 
 /* x2APIC Logical ID fields */ 
 #define X2APIC_LDR_BITVEC_MASK      0x0000ffff
@@ -222,7 +225,9 @@
 #define APIC_ERR_ILL_REG         (1<<7)
 #define APIC_REC_ILL_VEC         (1<<6)
 #define APIC_SENT_ILL_VEC        (1<<5)
-#define APIC_ERR_REDIR_IPI       (1<<4)	  // X2APIC
+#define APIC_ERR_REDIR_IPI       (1<<4) // X2APIC
+
+#define X2APIC_SELFIPI_RESERVED     0xffffff00
 
 /*
  * APIC register accessors
@@ -233,16 +238,16 @@
 
 #define APIC_LVT_ISMASKED(_lvt)  (_lvt & APIC_LVT_MASK)
 #define APIC_LVT_VECTOR(_lvt)    (_lvt & 0xff)
-                                              
+
 #define APIC_SPINT_REG(_apic)    (_apic[APICR_SVR][0])
 #define APIC_TIMER_REG(_apic)    (_apic[APICR_TIMERLVT][0])
 #define APIC_THERM_REG(_apic)    (_apic[APICR_THERMLVT][0])
 #define APIC_PC_REG(_apic)       (_apic[APICR_PCLVT][0])
 #define APIC_LINT0_REG(_apic)    (_apic[APICR_LVT0][0])
-#define APIC_LINT1_REG(_apic) 	 (_apic[APICR_LVT1][0])
-#define APIC_ERR_REG(_apic)   	 (_apic[APICR_ERRLVT][0])
-#define	APIC_INITCNT_REG(_apic)	 (_apic[APICR_INITCNT][0])
-#define	APIC_CURCNT_REG(_apic)	 (_apic[APICR_CURCNT][0])
+#define APIC_LINT1_REG(_apic)    (_apic[APICR_LVT1][0])
+#define APIC_ERR_REG(_apic)      (_apic[APICR_ERRLVT][0])
+#define APIC_INITCNT_REG(_apic)  (_apic[APICR_INITCNT][0])
+#define APIC_CURCNT_REG(_apic)   (_apic[APICR_CURCNT][0])
 
 #define APIC_SPINT_VECTOR(_apic) (APIC_SPINT_REG(_apic) & 0xff)
 #define APIC_TIMER_VECTOR(_apic) (APIC_TIMER_REG(_apic) & 0xff)
@@ -269,27 +274,27 @@
 #define IO_APIC_TIMER_PIN               2
 #define IO_APIC_RTC_PIN                 8
 
-#define IO_APIC_REG0_RES2_MASK		0x00FFFFFF
-#define IO_APIC_REG0_RES2_OFFSET	0
-#define IO_APIC_REG0_RES1_MASK		0xF0000000
-#define IO_APIC_REG0_RES1_OFFSET	28
+#define IO_APIC_REG0_RES2_MASK          0x00FFFFFF
+#define IO_APIC_REG0_RES2_OFFSET        0
+#define IO_APIC_REG0_RES1_MASK          0xF0000000
+#define IO_APIC_REG0_RES1_OFFSET        28
 
-#define IO_APIC_REG1_VERSION_MASK	0x000000FF
-#define IO_APIC_REG1_VERSION_OFFSET	0 
-#define IO_APIC_REG1_RES2_MASK		0x0000FF00
-#define IO_APIC_REG1_RES2_OFFSET	8
-#define IO_APIC_REG1_ENTRIES_MASK    	0x00FF0000
-#define IO_APIC_REG1_ENTRIES_OFFSET	16
-#define IO_APIC_REG1_RES1_MASK		0xFF000000
-#define IO_APIC_REG1_RES1_OFFSET	24
+#define IO_APIC_REG1_VERSION_MASK       0x000000FF
+#define IO_APIC_REG1_VERSION_OFFSET     0
+#define IO_APIC_REG1_RES2_MASK          0x0000FF00
+#define IO_APIC_REG1_RES2_OFFSET        8
+#define IO_APIC_REG1_ENTRIES_MASK       0x00FF0000
+#define IO_APIC_REG1_ENTRIES_OFFSET     16
+#define IO_APIC_REG1_RES1_MASK          0xFF000000
+#define IO_APIC_REG1_RES1_OFFSET        24
 
-#define IO_APIC_REG2_RES1_MASK		0x00FFFFFF
-#define IO_APIC_REG2_RES1_OFFSET	0
-#define IO_APIC_REG2_RES2_MASK		0xF0000000
-#define IO_APIC_REG2_RES2_OFFSET	28
+#define IO_APIC_REG2_RES1_MASK          0x00FFFFFF
+#define IO_APIC_REG2_RES1_OFFSET        0
+#define IO_APIC_REG2_RES2_MASK          0xF0000000
+#define IO_APIC_REG2_RES2_OFFSET        28
 
-#define IO_APIC_ROUTE_VECTOR_MASK	0x000000FF
-#define IO_APIC_ROUTE_VECTOR_OFFSET	0
+#define IO_APIC_ROUTE_VECTOR_MASK       0x000000FF
+#define IO_APIC_ROUTE_VECTOR_OFFSET     0
 
 #define IO_APIC_INTMASK_MASK            0x00010000
 #define IO_APIC_INTMASK_OFFSET          16
@@ -297,17 +302,17 @@
 #define IO_APIC_DELMODE_MASK            0x00000700
 #define IO_APIC_DELMODE_OFFSET          8
 
-#define IO_APIC_DESTMODE_MASK	        0x00000800
-#define IO_APIC_DESTMODE_OFFSET	        11
+#define IO_APIC_DESTMODE_MASK           0x00000800
+#define IO_APIC_DESTMODE_OFFSET         11
 
-#define IO_APIC_POLARITY_MASK	        0x00002000
-#define IO_APIC_POLARITY_OFFSET	        13
+#define IO_APIC_POLARITY_MASK           0x00002000
+#define IO_APIC_POLARITY_OFFSET         13
 
-#define IO_APIC_TRIGGER_MASK		0x00008000
-#define IO_APIC_TRIGGER_OFFSET	        15
+#define IO_APIC_TRIGGER_MASK            0x00008000
+#define IO_APIC_TRIGGER_OFFSET          15
 
-#define IO_APIC_DEST_MASK		0xff000000
-#define IO_APIC_DEST_OFFSET	        24
+#define IO_APIC_DEST_MASK               0xff000000
+#define IO_APIC_DEST_OFFSET             24
 
 #define IO_APIC_REG0_RES1(_reg) \
    ((_reg & IO_APIC_REG0_RES1_MASK) >> IO_APIC_REG0_RES1_OFFSET)
@@ -343,7 +348,6 @@
 //
 // We emulate an IOAPIC with 24 redirection registers
 //
-#define IOAPIC_NUM_REDIR_REGS	24
-#define IOAPIC_MAX_IOAPICS	1
+#define IOAPIC_NUM_REDIR_REGS 24
 
 #endif // _X86APIC_H_

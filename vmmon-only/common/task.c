@@ -1,5 +1,5 @@
 /*********************************************************
- * Copyright (C) 1998-2012 VMware, Inc. All rights reserved.
+ * Copyright (C) 1998-2014 VMware, Inc. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License as published by the
@@ -54,7 +54,9 @@
 #include "hostKernel.h"
 #include "comport.h"
 #include "crossgdt.h"
+#include "x86svm.h"
 #include "x86vt.h"
+#include "x86vtinstr.h"
 #include "apic.h"
 
 #if defined(_WIN64)
@@ -71,184 +73,96 @@
 } while (0)
 
 static CrossGDT *crossGDT = NULL;
-static MPN crossGDTMPNs[CROSSGDT_NUMPAGES];
+static MPN64 crossGDTMPNs[CROSSGDT_NUMPAGES];
 static DTR crossGDTDescHKLA;
 static Selector kernelStackSegment = 0;
 static uint32 dummyLVT;
-static Atomic_uint32 dummyVMCS[MAX_DUMMY_VMCSES];
-static Atomic_uint32 rootVMCS[MAX_PCPUS];
+static Atomic_uint64 hvRootPage[MAX_PCPUS];
 static Atomic_Ptr tmpGDT[MAX_PCPUS];
 static Bool pebsAvailable = FALSE;
 
-#if defined __APPLE__ && !vm_x86_64
-/* #include <i386/seg.h> can't find mach_kdb.h. */
-#   define KERNEL32_CS MAKE_SELECTOR_UNCHECKED(1, 0, 0)
-#   define KERNEL32_DS MAKE_SELECTOR_UNCHECKED(2, 0, 0)
-#   define KERNEL64_CS MAKE_SELECTOR_UNCHECKED(16, 0, 0)
-
-static Bool inCompatMode;
-static Bool inLongMode;
-
-#   define TASK_IF_COMPAT_MODE_THEN_ELSE(_thenBlock, _elseBlock)   \
-   if (inCompatMode) {                                             \
-      _thenBlock                                                   \
-   } else {                                                        \
-      _elseBlock                                                   \
-   }
-#else
-#   define TASK_IF_COMPAT_MODE_THEN_ELSE(_thenBlock, _elseBlock) { \
-      _elseBlock                                                   \
-   }
-#endif
-
 
 /*
  *-----------------------------------------------------------------------------
  *
- * TaskInCompatMode --
+ * TaskAllocHVRootPage --
  *
- *      Determine whether host is running in compatibility mode.
- *
- * Result:
- *      TRUE iff running in compatibility mode.
- *
- * Side effects:
- *      None.
- *
- *-----------------------------------------------------------------------------
- */
-
-static INLINE Bool
-TaskInCompatMode(void)
-{
-#if defined __APPLE__ && !vm_x86_64
-   return inCompatMode;
-#else
-   return FALSE;
-#endif
-}
-
-
-/*
- *-----------------------------------------------------------------------------
- *
- * TaskInLongMode --
- *
- *      Determine whether host is running in long mode.
- *
- * Result:
- *      TRUE iff running in long mode.
- *
- * Side effects:
- *      None.
- *
- *-----------------------------------------------------------------------------
- */
-
-static INLINE Bool
-TaskInLongMode(void)
-{
-#if defined __APPLE__ && !vm_x86_64
-   return inLongMode;
-#else
-   return vm_x86_64;
-#endif
-}
-
-
-/*
- *-----------------------------------------------------------------------------
- *
- * TaskAllocVMCS --
- *
- *      Allocate and initialize a VMCS page. Upon success, race to be the first
- *      to store its MPN in '*slot'.
+ *      Allocate and initialize an HV root page.  Upon success, race to be
+ *      the first to store the allocated MPN in '*slot'.
  *
  * Results:
  *      None.
  *
  * Side effects:
- *      When the call returns, '*slot' contains the MPN of a VMCS page if a
- *      thread succeeded, or INVALID_MPN if all threads failed.
+ *      When the call returns, '*slot' contains the MPN of an HV root page if
+ *      a thread succeeded, or INVALID_MPN if all threads failed.
  *
  *-----------------------------------------------------------------------------
  */
 
 static void
-TaskAllocVMCS(Atomic_uint32 *slot) // IN/OUT
+TaskAllocHVRootPage(Atomic_uint64 *slot) // IN/OUT
 {
-   uint32 *content = NULL;
-   uint64 vmxMsr;
-   MPN mpn = INVALID_MPN;
+   uint32 *content;
+   uint64 vmxBasicMSR;
+   MPN64 mpn;
+   static const MPN64 invalidMPN = INVALID_MPN;
 
-   ASSERT(slot);
+   ASSERT(slot != NULL);
 
-   /* Allocate the VMCS page content. */
+   /* Allocate the page contents. */
    content = HostIF_AllocKernelMem(PAGE_SIZE, TRUE);
-   if (!content) {
+   if (content == NULL) {
       Warning("%s: Failed to allocate content.\n", __FUNCTION__);
-      goto exit;
+      return;
    }
 
    /*
-    * Write the VMCS revision identifier at the beginning of the VMCS page
-    * content. In theory, nobody should read the random bytes after that.
-    * But we are paranoid, so we set them to a deterministic value.
+    * On VMX-capable hardware, write the VMCS revision identifier at the
+    * beginning of the HV root page.  On SVM-capable hardware, the HV root
+    * page is just initialized to zeroes.
     */
    memset(content, 0, PAGE_SIZE);
-   if (HostIF_SafeRDMSR(MSR_VMX_BASIC, &vmxMsr)) {
-      Warning("%s: Failed to read MSR.\n", __FUNCTION__);
-      goto exit;
+   if (HostIF_SafeRDMSR(MSR_VMX_BASIC, &vmxBasicMSR) == 0) {
+      *content = LODWORD(vmxBasicMSR);
    }
-   *content = LODWORD(vmxMsr);
 
-   /* Allocate the VMCS page. */
+   /* Allocate the HV root page. */
    mpn = HostIF_AllocMachinePage();
-   if (mpn == INVALID_MPN) {
-      Warning("%s: Failed to allocate page.\n", __FUNCTION__);
-      goto exit;
-   }
 
-   /* Copy the VMCS page content to the VMCS page. */
-   if (HostIF_WriteMachinePage(mpn, PtrToVA64(content))) {
-      Warning("%s: Failed to copy content.\n", __FUNCTION__);
-      goto exit;
-   }
-
-   /*
-    * Store the MPN of the VMCS page. This is done atomically, so if several
-    * threads concurrently race and call TaskAllocVMCS() with the same 'slot',
-    * only the first one to pass this finish line will win.
-    */
-
-   if (!Atomic_CMPXCHG32(slot, INVALID_MPN, mpn)) {
-      /* This thread lost the race. It must free its VMCS page. */
-      goto exit;
-   }
-
-   /* This thread won the race. It must not free its VMCS page. */
-   mpn = INVALID_MPN;
-
-exit:
    if (mpn != INVALID_MPN) {
-      HostIF_FreeMachinePage(mpn);
+      /*
+       * Store the MPN of the HV root page. This is done atomically, so if
+       * several threads concurrently race and call TaskAllocHVRootPage() with
+       * the same 'slot', only the first one to pass this finish line will win.
+       */
+      if (HostIF_WriteMachinePage(mpn, PtrToVA64(content)) != 0 ||
+          !Atomic_CMPXCHG64(slot, &invalidMPN, &mpn)) {
+         /*
+          * Either we couldn't set up the page or this thread lost the race.
+          * We must free its HV root page.
+          */
+         Warning("%s: Failed to setup page mpn=%llx.\n",
+                 __FUNCTION__, (long long unsigned)mpn);
+         HostIF_FreeMachinePage(mpn);
+      }
+   } else {
+      Warning("%s: Failed to allocate page.\n", __FUNCTION__);
    }
 
-   if (content) {
-      HostIF_FreeKernelMem(content);
-   }
+   HostIF_FreeKernelMem(content);
 }
 
 
 /*
  *-----------------------------------------------------------------------------
  *
- * TaskGetVMCS --
+ * TaskGetHVRootPage --
  *
- *      Lazily allocate a VMCS page, and return its MPN.
+ *      Lazily allocate an HV root page, and return its MPN.
  *
  * Results:
- *      On success: The MPN of the VMCS page.
+ *      On success: The MPN of the HV root page.
  *      On failure: INVALID_MPN.
  *
  * Side effects:
@@ -258,71 +172,47 @@ exit:
  *-----------------------------------------------------------------------------
  */
 
-static MPN
-TaskGetVMCS(Atomic_uint32 *slot) // IN/OUT
+static MPN64
+TaskGetHVRootPage(Atomic_uint64 *slot) // IN/OUT
 {
-   MPN mpn = Atomic_Read32(slot);
+   MPN64 mpn = Atomic_Read64(slot);
 
    if (mpn != INVALID_MPN) {
       return mpn;
    }
 
-   TaskAllocVMCS(slot);
+   TaskAllocHVRootPage(slot);
 
-   return Atomic_Read32(slot);
+   return Atomic_Read64(slot);
 }
 
 
 /*
  *-----------------------------------------------------------------------------
  *
- * Task_GetDummyVMCS --
+ * Task_GetHVRootPageForPCPU --
  *
- *      Lazily allocate a dummy VMCS page, and return its MPN.
+ *      Lazily allocate the HV root page for a pCPU, and return its MPN.
+ *      This is used for the VMXON region on Intel/VIA hardware and the
+ *      host save area on AMD hardware.
  *
  * Results:
- *      On success: The MPN of the dummy VMCS page.
+ *      On success: The MPN of the HV root page.
  *      On failure: INVALID_MPN.
  *
  * Side effects:
- *      Might allocate memory, and transition 'dummyVMCS[vmcsId]' from
+ *      Might allocate memory, and transition 'hvRootPage[pCPU]' from
  *      INVALID_MPN to a valid MPN.
  *
  *-----------------------------------------------------------------------------
  */
 
-MPN
-Task_GetDummyVMCS(int vmcsId) // IN
+MPN64
+Task_GetHVRootPageForPCPU(uint32 pCPU) // IN
 {
-   ASSERT(vmcsId < ARRAYSIZE(dummyVMCS));
-   return TaskGetVMCS(&dummyVMCS[vmcsId]);
-}
+   ASSERT(pCPU < ARRAYSIZE(hvRootPage));
 
-
-/*
- *-----------------------------------------------------------------------------
- *
- * Task_GetRootVMCS --
- *
- *      Lazily allocate the root VMCS page for a pCPU, and return its MPN.
- *
- * Results:
- *      On success: The MPN of the root VMCS page.
- *      On failure: INVALID_MPN.
- *
- * Side effects:
- *      Might allocate memory, and transition 'rootVMCS[pCPU]' from
- *      INVALID_MPN to a valid MPN.
- *
- *-----------------------------------------------------------------------------
- */
-
-MPN
-Task_GetRootVMCS(uint32 pCPU) // IN
-{
-   ASSERT(pCPU < ARRAYSIZE(rootVMCS));
-
-   return TaskGetVMCS(&rootVMCS[pCPU]);
+   return TaskGetHVRootPage(&hvRootPage[pCPU]);
 }
 
 
@@ -434,11 +324,9 @@ Task_GetTmpGDT(uint32 pCPU) // IN
 /*
  *-----------------------------------------------------------------------------
  *
- * TaskCheckVMXEPerCPU --
+ * TaskFreeHVRootPages --
  *
- *      Check for Intel VT VMX operation on the current logical CPU.
- *
- *	Function must not block (it is invoked from interrupt context).
+ *      Free all HV root pages (allocated by TaskAllocHVRootPage), if any.
  *
  * Results:
  *      None.
@@ -450,74 +338,13 @@ Task_GetTmpGDT(uint32 pCPU) // IN
  */
 
 static void
-TaskCheckVMXEPerCPU(void *data) // IN/OUT: Pointer to atomic counter
+TaskFreeHVRootPages(void)
 {
-   Atomic_uint32 *vmxeBitCount = (Atomic_uint32 *)data;
-
-   if (Vmx86_VMXEnabled()) {
-      Atomic_Add(vmxeBitCount, 1);
-   }
-}
-
-
-/*
- *-----------------------------------------------------------------------------
- *
- * TaskIsVMXDisabledOnAllCPUs --
- *
- *      Check for Intel VT VMX operation on all CPUs.
- *
- * Results:
- *      TRUE if none of CPUs in VMX operation, FALSE otherwise.
- *
- * Side effects:
- *      None.
- *
- *-----------------------------------------------------------------------------
- */
-
-static Bool
-TaskIsVMXDisabledOnAllCPUs(void)
-{
-   Atomic_uint32 vmxeBitCount;
-
-   Atomic_Write(&vmxeBitCount, 0);
-   HostIF_CallOnEachCPU(TaskCheckVMXEPerCPU, &vmxeBitCount);
-
-   return Atomic_Read(&vmxeBitCount) == 0;
-}
-
-
-/*
- *-----------------------------------------------------------------------------
- *
- * TaskFreeVMCS --
- *
- *      Free all VMCS pages (allocated by TaskAllocVMCS), if any.
- *
- * Results:
- *      None.
- *
- * Side effects:
- *      None.
- *
- *-----------------------------------------------------------------------------
- */
-
-static void
-TaskFreeVMCS(void)
-{
-   MPN mpn;
+   MPN64 mpn;
    unsigned i;
 
-   for (i = 0; i < ARRAYSIZE(dummyVMCS); i++) {
-      mpn = Atomic_Read32(&dummyVMCS[i]);
-      if (mpn != INVALID_MPN) {
-         HostIF_FreeMachinePage(mpn);
-      }
-   }
-   for (i = 0; i < ARRAYSIZE(rootVMCS); i++) {
-      mpn = Atomic_Read32(&rootVMCS[i]);
+   for (i = 0; i < ARRAYSIZE(hvRootPage); i++) {
+      mpn = Atomic_Read64(&hvRootPage[i]);
       if (mpn != INVALID_MPN) {
          HostIF_FreeMachinePage(mpn);
       }
@@ -566,16 +393,8 @@ TaskAssertFail(int line)
 static INLINE void
 TaskSaveGDT64(DTR64 *hostGDT64)  // OUT
 {
-   TASK_IF_COMPAT_MODE_THEN_ELSE({
-      __asm__ __volatile__("lcall %1,$TaskCM_SaveGDT64"
-                           :
-                           : "a" (hostGDT64),
-                             "i" (KERNEL64_CS)
-                           : "memory");
-   }, {
-      hostGDT64->offset = 0;
-      _Get_GDT((DTR *)hostGDT64);
-   })
+   hostGDT64->offset = 0;
+   _Get_GDT((DTR *)hostGDT64);
 }
 
 
@@ -598,47 +417,8 @@ TaskSaveGDT64(DTR64 *hostGDT64)  // OUT
 static INLINE void
 TaskSaveIDT64(DTR64 *hostIDT64)  // OUT
 {
-   TASK_IF_COMPAT_MODE_THEN_ELSE({
-      __asm__ __volatile__("lcall %1,$TaskCM_SaveIDT64"
-                           :
-                           : "a" (hostIDT64),
-                             "i" (KERNEL64_CS)
-                           : "memory");
-   }, {
-      hostIDT64->offset = 0;
-      _Get_IDT((DTR *)hostIDT64);
-   })
-}
-
-
-/*
- *-----------------------------------------------------------------------------
- *
- * TaskLoadGDT64 --
- *
- *      Load the current GDT from the caller-supplied struct.
- *
- * Results:
- *      Processor's GDT = *hostGDT64.
- *
- * Side effects:
- *      None.
- *
- *-----------------------------------------------------------------------------
- */
-
-static INLINE void
-TaskLoadGDT64(DTR64 *hostGDT64)  // IN
-{
-   TASK_IF_COMPAT_MODE_THEN_ELSE({
-      __asm__ __volatile__("lcall %1,$TaskCM_LoadGDT64"
-                           :
-                           : "a" (hostGDT64),
-                             "i" (KERNEL64_CS)
-                           : "memory");
-   }, {
-      _Set_GDT((DTR *)hostGDT64);
-   })
+   hostIDT64->offset = 0;
+   _Get_IDT((DTR *)hostIDT64);
 }
 
 
@@ -661,79 +441,7 @@ TaskLoadGDT64(DTR64 *hostGDT64)  // IN
 static INLINE void
 TaskLoadIDT64(DTR64 *hostIDT64)  // IN
 {
-   TASK_IF_COMPAT_MODE_THEN_ELSE({
-      __asm__ __volatile__("lcall %1,$TaskCM_LoadIDT64"
-                           :
-                           : "a" (hostIDT64),
-                             "i" (KERNEL64_CS)
-                           : "memory");
-   }, {
-      _Set_IDT((DTR *)hostIDT64);
-   })
-}
-
-
-/*
- *-----------------------------------------------------------------------------
- *
- * TaskLoadTR64 --
- *
- *      Load the current TR, switching to 64-bit mode from compatibility mode
- *      so we get the full 64-bit base, if necessary.
- *
- * Results:
- *      Processor's TR = hostTR
- *
- * Side effects:
- *      None.
- *
- *-----------------------------------------------------------------------------
- */
-
-static INLINE void
-TaskLoadTR64(Selector hostTR)  // IN
-{
-   TASK_IF_COMPAT_MODE_THEN_ELSE({
-      __asm__ __volatile__("lcall %1,$TaskCM_LoadTR64"
-                           :
-                           : "a" (hostTR),
-                             "i" (KERNEL64_CS)
-                           : "memory");
-   }, {
-      SET_TR(hostTR);
-   })
-}
-
-
-/*
- *-----------------------------------------------------------------------------
- *
- * TaskLoadLDT64 --
- *
- *      Load the current LDT, switching to 64-bit mode from compatibility mode
- *      so we get the full 64-bit base, if necessary.
- *
- * Results:
- *      Processor's LDT = hostLDT
- *
- * Side effects:
- *      None.
- *
- *-----------------------------------------------------------------------------
- */
-
-static INLINE void
-TaskLoadLDT64(Selector hostLDT)  // IN
-{
-   TASK_IF_COMPAT_MODE_THEN_ELSE({
-      __asm__ __volatile__("lcall %1,$TaskCM_LoadLDT64"
-                           :
-                           : "a" (hostLDT),
-                             "i" (KERNEL64_CS)
-                           : "memory");
-   }, {
-      SET_LDT(hostLDT);
-   })
+   _Set_IDT((DTR *)hostIDT64);
 }
 
 
@@ -760,20 +468,9 @@ static INLINE void
 TaskCopyGDT64(DTR64 *hostGDT64,  // IN  GDT to be copied from
               Descriptor *out)   // OUT where to copy contents to
 {
-   TASK_IF_COMPAT_MODE_THEN_ELSE({
-      uint32 ediGetsWiped;
-
-      __asm__ __volatile__("lcall %3,$TaskCM_CopyGDT64"
-                           : "=D" (ediGetsWiped)
-                           : "0" (out),
-                             "d" (hostGDT64),
-                             "i" (KERNEL64_CS)
-                           : "ecx", "esi", "cc", "memory");
-   }, {
-      memcpy(out,
-             (void *)HOST_KERNEL_LA_2_VA((LA)hostGDT64->offset),
-             hostGDT64->limit + 1);
-   })
+   memcpy(out,
+          (void *)HOST_KERNEL_LA_2_VA((LA)hostGDT64->offset),
+          hostGDT64->limit + 1);
 }
 
 
@@ -796,17 +493,7 @@ TaskCopyGDT64(DTR64 *hostGDT64,  // IN  GDT to be copied from
 void
 Task_Terminate(void)
 {
-   if (TaskIsVMXDisabledOnAllCPUs()) {
-      TaskFreeVMCS();
-   } else {
-      /*
-       * XXX We leak the VMCS pages. We ignore the issue because:
-       * o It is rare: it can only happen if you run another virtualization
-       *   product concurrently with ours.
-       * o It is not a lot of pages.
-       * o We do not know how to solve the issue anyway.
-       */
-   }
+   TaskFreeHVRootPages();
 
    if (crossGDT != NULL) {
       HostIF_FreeCrossGDT(CROSSGDT_NUMPAGES, crossGDT);
@@ -850,23 +537,15 @@ Task_Initialize(void)
 {
    unsigned i;
 
-   ASSERT_ON_COMPILE(sizeof (Atomic_uint32) == sizeof (MPN));
-   for (i = 0; i < ARRAYSIZE(dummyVMCS); i++) {
-      Atomic_Write32(&dummyVMCS[i], INVALID_MPN);
-   }
-   for (i = 0; i < ARRAYSIZE(rootVMCS); i++) {
-      Atomic_Write32(&rootVMCS[i], INVALID_MPN);
+   ASSERT_ON_COMPILE(sizeof (Atomic_uint64) == sizeof (MPN64));
+   for (i = 0; i < ARRAYSIZE(hvRootPage); i++) {
+      Atomic_Write64(&hvRootPage[i], INVALID_MPN);
    }
    if (USE_TEMPORARY_GDT) {
       for (i = 0; i < ARRAYSIZE(tmpGDT); i++) {
          Atomic_WritePtr(&tmpGDT[i], NULL);
       }
    }
-
-#if defined __APPLE__ && !vm_x86_64
-   inCompatMode = Vmx86_InCompatMode();
-   inLongMode   = Vmx86_InLongMode();
-#endif
 
    /*
     * The worldswitch code doesn't work with a zero stack segment
@@ -875,11 +554,8 @@ Task_Initialize(void)
     * read/write flat data segment.
     */
 
-#if defined __APPLE__ && !vm_x86_64
-   kernelStackSegment = KERNEL32_DS;
-#else
    kernelStackSegment = GET_SS();
-   if (vm_x86_64 && (kernelStackSegment == 0)) {
+   if (kernelStackSegment == 0) {
       DTR hostGDTR;
 
       GET_GDT(hostGDTR);
@@ -898,7 +574,6 @@ Task_Initialize(void)
       return FALSE;
 gotnzss:;
    }
-#endif
    if ((kernelStackSegment == 0) || ((kernelStackSegment & 7) != 0)) {
            Warning("Task_Initialize: unsupported SS %04x\n",
                    kernelStackSegment);
@@ -911,6 +586,7 @@ gotnzss:;
     *
     * IA32_MISC_ENABLE.EMON_AVAILABE (bit 7) is set and 
     * IA32_MISC_ENABLE.PEBS_UNAVAILABE (bit 12) is clear.
+:if expand("%") == ""|browse confirm w|else|confirm w|endif
     */
   
    if ((CPUID_GetVendor() == CPUID_VENDOR_INTEL) &&
@@ -981,18 +657,6 @@ TaskRestoreHostGDTTRLDT(Descriptor *tempGDTBase,
       const unsigned size = sizeof(Descriptor);
       const Selector ss   = SELECTOR_CLEAR_RPL(GET_SS());
 
-      /*
-       * Compat mode is when we're compiled as 32-bit code but the host is
-       * 64-bit, in which case you could have a GDT with a 64-bit address but
-       * we can only access 32-bit addresses.  This ASSERT make sure we can
-       * access the host GDT.
-       *
-       * Note the only time we run in compat mode is on 32-bit Mac OS, in
-       * which case we don't use the temporary GDT stuff.
-       */
-
-      ASSERT(!TaskInCompatMode());
-
       ASSERT(hostGDTVA == HOST_KERNEL_LA_2_VA(hostGDT64.offset));
 
       ASSERT(SELECTOR_RPL(cs) == 0 && SELECTOR_TABLE(cs) == 0);
@@ -1036,30 +700,20 @@ TaskRestoreHostGDTTRLDT(Descriptor *tempGDTBase,
       _Set_GDT((DTR *)&hostGDT64);
       SET_LDT(ldt);
    } else {
+      Descriptor *desc;
+
       /*
        * The host isn't picky about the TR entry.  So clear the TSS<busy> bit
        * in the host GDT, then restore host GDT and TR, then LDT.
        */
 
-      TASK_IF_COMPAT_MODE_THEN_ELSE({
-         __asm__ __volatile__("lcall %3,$TaskCM_RestoreGDTTRLDT64"
-                              :
-                              : "c" (&hostGDT64),
-                                "a" ((uint32)tr),
-                                "d" ((uint32)ldt),
-                                "i" (KERNEL64_CS)
-                              : "cc", "memory");
-      }, {
-         Descriptor *desc;
-
-         desc = (Descriptor *)((VA)HOST_KERNEL_LA_2_VA(hostGDT64.offset + tr));
-         if (Desc_Type(desc) == TASK_DESC_BUSY) {
-            Desc_SetType(desc, TASK_DESC);
-         }
-         _Set_GDT((DTR *)&hostGDT64);
-         SET_TR(tr);
-         SET_LDT(ldt);
-      })
+      desc = (Descriptor *)((VA)HOST_KERNEL_LA_2_VA(hostGDT64.offset + tr));
+      if (Desc_Type(desc) == TASK_DESC_BUSY) {
+         Desc_SetType(desc, TASK_DESC);
+      }
+      _Set_GDT((DTR *)&hostGDT64);
+      SET_TR(tr);
+      SET_LDT(ldt);
    }
 }
 
@@ -1097,7 +751,7 @@ Task_AllocCrossGDT(InitBlock *initBlock)  // OUT: crossGDT values filled in
     */
 
    if (crossGDT == NULL) {
-      static const MPN maxValidFirst =
+      MPN64 maxValidFirst =
          0xFFC00 /* 32-bit MONITOR_LINEAR_START */ - CROSSGDT_NUMPAGES;
 
       /*
@@ -1136,7 +790,7 @@ Task_AllocCrossGDT(InitBlock *initBlock)  // OUT: crossGDT values filled in
          HostIF_FreeCrossGDT(CROSSGDT_NUMPAGES, crossGDT);
          crossGDT = NULL;
          HostIF_GlobalUnlock(2);
-         Warning("%s: crossGDT MPN %X gt %X\n", __FUNCTION__,
+         Warning("%s: crossGDT MPN %"FMT64"X gt %"FMT64"X\n", __FUNCTION__,
                  crossGDTMPNs[0], maxValidFirst);
 
          return FALSE;
@@ -1215,7 +869,7 @@ Task_InitCrosspage(VMDriver *vm,          // IN
    for (vcpuid = 0; vcpuid < initParams->numVCPUs;  vcpuid++) {
       VA64         crossPageUserAddr = initParams->crosspage[vcpuid];
       VMCrossPage *p                 = HostIF_MapCrossPage(vm, crossPageUserAddr);
-      MPN          crossPageMPN;
+      MPN64        crossPageMPN;
 
       if (p == NULL) {
          return 1;
@@ -1263,8 +917,8 @@ Task_InitCrosspage(VMDriver *vm,          // IN
       }
 
       if (crossPageMPN > MA_2_MPN(0xFFFFFFFF)) {
-         Warning("%s*: crossPageMPN 0x%llx invalid\n", __FUNCTION__,
-                 (unsigned long long)crossPageMPN);
+         Warning("%s*: crossPageMPN 0x%016" FMT64 "x invalid\n", __FUNCTION__,
+                 crossPageMPN);
          return 1;
       }
       if (!pseudoTSC.initialized) {
@@ -1280,14 +934,7 @@ Task_InitCrosspage(VMDriver *vm,          // IN
        * active.
        */
 
-#if defined __APPLE__ && !vm_x86_64
-      p->crosspageData.hostInitial32CS = KERNEL32_CS;
-      p->crosspageData.hostInitial64CS = KERNEL64_CS;
-#else
-      p->crosspageData.hostInitial64CS = p->crosspageData.hostInitial32CS = GET_CS();
-#endif
-      TS_ASSERT(SELECTOR_RPL  (p->crosspageData.hostInitial32CS) == 0 &&
-                SELECTOR_TABLE(p->crosspageData.hostInitial32CS) == 0);
+      p->crosspageData.hostInitial64CS = GET_CS();
       TS_ASSERT(SELECTOR_RPL  (p->crosspageData.hostInitial64CS) == 0 &&
                 SELECTOR_TABLE(p->crosspageData.hostInitial64CS) == 0);
 
@@ -1297,6 +944,8 @@ Task_InitCrosspage(VMDriver *vm,          // IN
       p->crosspageData.pseudoTSCConv.p.add   = 0;
       p->crosspageData.pseudoTSCConv.changed = TRUE;
       p->crosspageData.worldSwitchPTSC       = Vmx86_GetPseudoTSC();
+      p->crosspageData.timerIntrTS           = MAX_ABSOLUTE_TS;
+      p->crosspageData.hstTimerExpiry        = MAX_ABSOLUTE_TS;
       p->crosspageData.monTimerExpiry        = MAX_ABSOLUTE_TS;
       vm->crosspage[vcpuid]                  = p;
    }
@@ -1473,13 +1122,8 @@ static INLINE void
 TaskEnableTF(void)
 {
 #if defined(__GNUC__)
-#ifdef VM_X86_64
    asm volatile ("pushfq ; orb $1,1(%rsp) ; popfq");
-#else
-   asm volatile ("pushfl ; orb $1,1(%esp) ; popfl");
-#endif
 #elif defined(_MSC_VER)
-#ifdef VM_X86_64
    static CODE_BUF uint8 const setTFCode64[] = {
       0x9C,                          // pushfq
       0x80, 0x4C, 0x24, 0x01, 0x01,  // orb $1,1(%rsp)
@@ -1487,14 +1131,6 @@ TaskEnableTF(void)
       0xC3 };                        // retq
 
    ((void (*)(void))setTFCode64)();
-#else
-   __asm {
-      pushf
-      mov    al,1
-      or     [esp+1],al
-      popf
-   }
-#endif
 #else
 #error no compiler for setting stress flag
 #endif
@@ -1521,13 +1157,8 @@ static INLINE void
 TaskDisableTF(void)
 {
 #if defined(__GNUC__)
-#ifdef VM_X86_64
    asm volatile ("pushfq ; andb $~1,1(%rsp) ; popfq");
-#else
-   asm volatile ("pushfl ; andb $~1,1(%esp) ; popfl");
-#endif
 #elif defined(_MSC_VER)
-#ifdef VM_X86_64
    static CODE_BUF uint8 const clrTFCode64[] = {
       0x9C,                          // pushfq
       0x80, 0x64, 0x24, 0x01, 0xFE,  // andb $~1,1(%rsp)
@@ -1535,14 +1166,6 @@ TaskDisableTF(void)
       0xC3 };                        // retq
 
    ((void (*)(void))clrTFCode64)();
-#else
-   __asm {
-      pushf
-      mov    al,254
-      and    [esp+1],al
-      popf
-   }
-#endif
 #else
 #error no compiler for clearing stress flag
 #endif
@@ -1702,22 +1325,10 @@ TaskRestoreDebugRegisters(VMCrossPageData *crosspage)
       }                                                               \
    }
 
-   TASK_IF_COMPAT_MODE_THEN_ELSE({
-      uint32 edxGetsWiped;
-
-      __asm__ __volatile__("lcall %3,$TaskCM_RestoreDebugRegisters64"
-                           : "=d" (edxGetsWiped)
-                           : "c" (crosspage->hostDR),
-                             "0" (crosspage->hostDRInHW),
-                             "i" (KERNEL64_CS)
-                           : "eax", "cc", "memory");
-   }, {
-      RESTORE_DR(0);
-      RESTORE_DR(1);
-      RESTORE_DR(2);
-      RESTORE_DR(3);
-   })
-
+   RESTORE_DR(0);
+   RESTORE_DR(1);
+   RESTORE_DR(2);
+   RESTORE_DR(3);
    RESTORE_DR(6);
 
    /*
@@ -1751,7 +1362,7 @@ TaskUpdateLatestPTSC(VMDriver *vm, VMCrossPageData *crosspage)
 {
    if (Vmx86_HwTSCsSynced()) {
       uint64 latest;
-      /* 
+      /*
        * Determine a conservative estimate for the last PTSC value the
        * VMM may have used.  We can't just use
        * crosspage->worldSwitchPTSC since some callees of BackToHost
@@ -1798,9 +1409,9 @@ TaskUpdatePTSCParameters(VMDriver *vm,
    ASSERT_NO_INTERRUPTS();
    ASSERT_ON_COMPILE(sizeof(vm->ptscOffsetInfo) == sizeof(Atomic_uint64));
    ptsc = Vmx86_GetPseudoTSC();
-   /* 
+   /*
     * Use unsigned comparison to test ptsc inside the interval:
-    *   [worldSwitchPTSC, worldSwitchPTSC + largeDelta) 
+    *   [worldSwitchPTSC, worldSwitchPTSC + largeDelta)
     * where largeDelta is choosen to be much larger than the normal time
     * between worldswitches, but not so large that we'd miss a jump due
     * to TSC reset.
@@ -1886,7 +1497,7 @@ TaskUpdatePTSCParameters(VMDriver *vm,
                /* Must read ptscLatest after reading ptscOffsetInfo. */
                uint64 latest = Atomic_Read64(&vm->ptscLatest);
                if (UNLIKELY(ptsc < latest)) {
-                  /* 
+                  /*
                    * The Vmx86_GetPseudoTSC call above occurred before
                    * some other vcpu thread exited the monitor; need to
                    * bump forward.
@@ -1897,7 +1508,7 @@ TaskUpdatePTSCParameters(VMDriver *vm,
             } else {
                ptscOffset = Vmx86_GetPseudoTSCOffset();
             }
-            /* 
+            /*
              * Since inVMMCnt is zero, it is safe to update our entry in
              * ptscOffsets -- no other thread will try to read it until
              * the inVMMCnt > 0.
@@ -1912,7 +1523,7 @@ TaskUpdatePTSCParameters(VMDriver *vm,
       /* Use the designated global offset as this thread's offset. */
       crosspage->pseudoTSCConv.p.add   = vm->ptscOffsets[new.vcpuid];
       crosspage->pseudoTSCConv.changed = TRUE;
-      /* 
+      /*
        * Need to derive the worldSwitchPTSC value from TSC since the
        * PTSC, when calculated from TSC, may drift from the reference
        * clock over the short term.
@@ -1939,20 +1550,13 @@ TaskUpdatePTSCParameters(VMDriver *vm,
  *      between GCC and MSC.
  *
  *      Since we have complete control over what GCC does with asm volatile,
- *      this amounts to having GCC do exactly what MSC does.  So for
- *      32-bit hosts, we use the fastcall format, i.e., pass the one-and-only
- *      parameter in ECX.  For 64-bit hosts, we pass the parameter in RCX.
+ *      this amounts to having GCC do exactly what MSC does.
+ *      For 64-bit hosts, we pass the parameter in RCX.
  *
- *      For 32-bit GCC and MSC, the callee is expected to preserve
- *      EBX,ESI,EDI,EBP,ESP, so the worldswitch just saves those registers.
  *      For 64-bit GCC, the callee is expected to preserve
  *      RBX,RBP,RSP,R12..R15, whereas MSC expects the callee to preserve
  *      RBX,RSI,RDI,RBP,RSP,R12..R15.  So for simplicity, we have the
  *      worldswitch code save RBX,RSI,RDI,RBP,RSP,R12..R15.
- *
- *      The worldswitch code figures out if it's jumping to a 32-bit or 64-bit
- *      monitor and acts accordingly, so we don't have to split off those cases
- *      here.
  *
  * From an email with Petr regarding gcc's handling of the stdcall
  * attribute for x86-64:
@@ -1981,16 +1585,10 @@ TaskSwitchToMonitor(VMCrossPage *crosspage)
                            crosspage->crosspageCode.worldswitch.hostToVmm);
 
 #if defined(__GNUC__)
-
-#if defined(VM_X86_64)
    /*
-    * GCC on 64-bit host:
-    *
-    * Pass the crosspage pointer in RCX just like the 64-bit MSC does.
+    * Pass the crosspage pointer in RCX just like 64-bit MSC does.
     * Tell GCC that the worldswitch preserves RBX,RSI,RDI,RBP,RSP,
     * R12..R15 just like the MSC 64-bit calling convention.
-    *
-    * Using ifdef so we don't ever try to compile this on 32-bit system.
     */
 
    {
@@ -2003,66 +1601,13 @@ TaskSwitchToMonitor(VMCrossPage *crosspage)
                              "1" (crosspage)
                            : "rdx", "r8", "r9", "r10", "r11", "cc", "memory");
    }
-#else
-   /*
-    * GCC on 32-bit (compatibility or legacy) mode host:
-    *
-    * Pass the crosspage pointer in ECX just like the 32-bit MSC
-    * fastcall convention.  MSC calling also expects worldswitch to
-    * preserve EBX,ESI,EDI,EBP,ESP so tell GCC likewise.
-    */
-
-   TASK_IF_COMPAT_MODE_THEN_ELSE({
-      uint32 eaxGetsWiped;
-      uint32 ecxGetsWiped;
-
-      __asm__ __volatile__("lcall %4,$TaskCM_CallWS"
-                           : "=a" (eaxGetsWiped),
-                             "=c" (ecxGetsWiped)
-                           : "0" (codePtr),
-                             "1" (crosspage),
-                             "i" (KERNEL64_CS)
-                           : "edx", "cc", "memory");
-   }, {
-      uint32 eaxGetsWiped;
-      uint32 ecxGetsWiped;
-
-      __asm__ __volatile__("call *%%eax"
-                           : "=a" (eaxGetsWiped),
-                             "=c" (ecxGetsWiped)
-                           : "0" (codePtr),
-                             "1" (crosspage)
-                           : "edx", "cc", "memory");
-   })
-#endif // defined(VM_X86_64)
-
 #elif defined(_MSC_VER)
-
    /*
-    * MSC on 64-bit host:
-    *
     * The 64-bit calling convention is to pass the argument in RCX and that
     * the called function must preserve RBX,RSI,RDI,RBP,RSP,R12..R15.
-    *
-    * While we strictly don't need ifdef in this case, we do it to be
-    * consistent with the GCC case.
     */
 
-#if defined(VM_X86_64)
    (*(void (*)(VMCrossPage *))codePtr)(crosspage);
-#else
-
-   /*
-    * MSC on 32-bit host:
-    *
-    * The 32-bit fastcall convention is to pass the argument in ECX and that
-    * the called function must preserve EBX,ESI,EDI,EBP,ESP.
-    */
-
-   TS_ASSERT(!TaskInCompatMode());
-   (*(void (__fastcall *)(VMCrossPage *))codePtr)(crosspage);
-#endif // defined(VM_X86_64)
-
 #else
 #error No compiler defined for TaskSwitchToMonitor
 #endif
@@ -2104,7 +1649,7 @@ TaskTestCrossPageExceptionHandlers(VMCrossPage *crosspage)
       RAISE_INTERRUPT(EXC_NMI);
       TS_ASSERT(TaskGotException(crosspage, EXC_NMI));
 
-#if defined(VM_X86_64) && defined(__GNUC__)
+#if defined(__GNUC__)
       /*
        * Test the LRETQ in the 64-bit mini NMI handler to make sure
        * it works with any 16-byte offset of the stack pointer.
@@ -2153,6 +1698,33 @@ TaskTestCrossPageExceptionHandlers(VMCrossPage *crosspage)
 /*
  *-----------------------------------------------------------------------------
  *
+ * TaskShouldRetryWorldSwitch --
+ *
+ *      Returns whether or not we should retry the world switch.
+ *
+ *      It is possible that the gotNMI and/or gotMCE was detected when
+ *      switching in the host->monitor direction, in which case the
+ *      retryWorldSwitch flag will be set.  If such is the case, we
+ *      want to immediately loop back to the monitor as that is what
+ *      it is expecting us to do.
+ *
+ *-----------------------------------------------------------------------------
+ */
+
+static INLINE Bool
+TaskShouldRetryWorldSwitch(VMCrossPage *crosspage)
+{
+   if (crosspage->crosspageData.retryWorldSwitch) {
+      crosspage->crosspageData.retryWorldSwitch = FALSE;
+      return TRUE;
+   }
+   return FALSE;
+}
+
+
+/*
+ *-----------------------------------------------------------------------------
+ *
  * Task_Switch --
  *
  *      Switches from the host context into the monitor
@@ -2175,8 +1747,7 @@ Task_Switch(VMDriver *vm,  // IN
             Vcpuid vcpuid) // IN
 {
    Bool        loopForced;
-   uintptr_t   flags, cr0reg, cr2reg, cr4reg, new_cr4;
-   uintptr_t   cr3reg;
+   uintptr_t   flags;
    uint64      fs64  = 0;
    uint64      gs64  = 0;
    uint64      kgs64 = 0;
@@ -2190,6 +1761,9 @@ Task_Switch(VMDriver *vm,  // IN
    Bool pcNMI;
    Bool thermalNMI;
    VMCrossPage *crosspage = vm->crosspage[vcpuid];
+   uint32 pCPU;
+   MPN64 hvRootMPN;
+   Descriptor *tempGDTBase;
 
    ASSERT_ON_COMPILE(sizeof(VMCrossPage) == PAGE_SIZE);
    TaskDisableNMI(&vm->hostAPIC, &lint0NMI, &lint1NMI, &pcNMI, &thermalNMI);
@@ -2197,413 +1771,383 @@ Task_Switch(VMDriver *vm,  // IN
    CLEAR_INTERRUPTS();
 
    loopForced = FALSE;
-   while (TRUE) {
-      const uint32 pCPU = HostIF_GetCurrentPCPU();
-      Descriptor *tempGDTBase;
+   pCPU = HostIF_GetCurrentPCPU();
+   ASSERT(pCPU < ARRAYSIZE(hvRootPage) && pCPU < ARRAYSIZE(tmpGDT));
 
-      /*
-       * Don't overwrite the crosspages arguments when allocating the root VMCS
-       * or the temp GDT - PR 820257.  We can't allocate memory with interrupts 
-       * disabled on all hosts so we make a modulecall to do it.  
-       */
-      if (crosspage->crosspageData.inVMXOperation) {
-         MPN mpn;
+   hvRootMPN = Atomic_Read64(&hvRootPage[pCPU]);
+   tempGDTBase = USE_TEMPORARY_GDT ? Atomic_ReadPtr(&tmpGDT[pCPU]) : NULL;
 
-         ASSERT(pCPU < ARRAYSIZE(rootVMCS));
-         mpn = Atomic_Read32(&rootVMCS[pCPU]);
-         if (UNLIKELY(mpn == INVALID_MPN)) {
-            crosspage->crosspageData.userCallType = MODULECALL_USERCALL_NONE;
-            crosspage->crosspageData.moduleCallType = MODULECALL_ALLOC_VMX_PAGE;
-            crosspage->crosspageData.pcpuNum = pCPU;
-            break;
+   /*
+    * We can't allocate memory with interrupts disabled on all hosts
+    * so we dummy up a modulecall to do it before we start in on the
+    * world switch.  We must be careful not to overwrite the
+    * crosspages arguments when doing this though, see bug 820257.
+    */
+   if (hvRootMPN == INVALID_MPN &&
+       (crosspage->crosspageData.activateVMX ||
+        crosspage->crosspageData.activateSVM)) {
+      crosspage->crosspageData.userCallType = MODULECALL_USERCALL_NONE;
+      crosspage->crosspageData.moduleCallType = MODULECALL_ALLOC_VMX_PAGE;
+      crosspage->crosspageData.pcpuNum = pCPU;
+   } else if (USE_TEMPORARY_GDT && tempGDTBase == NULL) {
+      crosspage->crosspageData.userCallType = MODULECALL_USERCALL_NONE;
+      crosspage->crosspageData.moduleCallType = MODULECALL_ALLOC_TMP_GDT;
+      crosspage->crosspageData.pcpuNum = pCPU;
+   } else {
+      do {
+         uintptr_t cr0reg, cr2reg, cr3reg, cr4reg;
+         uint64 efer     = ~0ULL;
+         Bool needVMXOFF = FALSE;
+         MA foreignVMCS  = ~0ULL;
+         MA foreignHSAVE = ~0ULL;
+
+         vm->currentHostCpu[vcpuid] = pCPU;
+
+         TaskUpdatePTSCParameters(vm, &crosspage->crosspageData, vcpuid);
+
+         /*
+          * Disable PEBS if it is supported and enabled.  Do this while on the
+          * hosts IDT - PR 848701.
+          */
+         if (pebsAvailable) {
+            pebsMSR = __GET_MSR(IA32_MSR_PEBS_ENABLE);
+            if (pebsMSR != 0) {
+               __SET_MSR(IA32_MSR_PEBS_ENABLE, 0);
+            }
          }
 
-         crosspage->crosspageData.rootVMCS = MPN_2_MA(mpn);
-      }
+         /*
+          * Save the host's standard IDT and set up an IDT that only
+          * space for all the hardware exceptions (though only a few are
+          * handled).
+          */
 
-      if (USE_TEMPORARY_GDT) {
-         ASSERT(pCPU < ARRAYSIZE(tmpGDT));
-         tempGDTBase = Atomic_ReadPtr(&tmpGDT[pCPU]);
-         if (UNLIKELY(!tempGDTBase)) {
-            crosspage->crosspageData.userCallType = MODULECALL_USERCALL_NONE;
-            crosspage->crosspageData.moduleCallType = MODULECALL_ALLOC_TMP_GDT;
-            crosspage->crosspageData.pcpuNum = pCPU;
-            break;
+         TaskSaveIDT64(&hostIDT64);
+         TaskLoadIDT64(&crosspage->crosspageData.switchHostIDTR);
+         TaskTestCrossPageExceptionHandlers(crosspage);
+
+         if (crosspage->crosspageData.activateVMX) {
+            /*
+             * Ensure that VMX is enabled and locked in the feature control MSR,
+             * so that we can set CR4.VMXE to activate VMX.
+             */
+            uint64 bits = MSR_FEATCTL_LOCK | MSR_FEATCTL_VMXE;
+            uint64 featCtl = __GET_MSR(MSR_FEATCTL);
+            if ((featCtl & bits) != bits) {
+               if ((featCtl & MSR_FEATCTL_LOCK) != 0) {
+                  Panic("Intel VT-x is disabled and locked on CPU %d\n", pCPU);
+               }
+               __SET_MSR(MSR_FEATCTL, featCtl | bits);
+            }
          }
-      } else {
-         tempGDTBase = NULL; /* Silence compiler warning. */
-      }
 
-      /*
-       * Save CR state.  The switchcode deals with CR3, except we clear its
-       * CR3.PCD and CR3.PWT bits. The monitor and switchcode deal with EFER.
-       */
+         /*
+          * Save CR state.  The monitor deals with EFER.
+          */
 
-      GET_CR0(cr0reg);
-      GET_CR2(cr2reg);
-      GET_CR4(cr4reg);
-#ifdef VM_X86_64
-      GET_CR3(cr3reg);
-#else
-      cr3reg = 0;               /* compiler will delete dead assignment */
-#endif
+         GET_CR2(cr2reg);
+         GET_CR0(cr0reg);
+         GET_CR4(cr4reg);
+         GET_CR3(cr3reg);
+         crosspage->crosspageData.hostCR3 = cr3reg;
 
-      vm->currentHostCpu[vcpuid] = pCPU;
+         /*
+          * Any reserved bits in CR0 must be preserved when we switch
+          * to the VMM. [See PR 291004.]  (On the other hand, Intel
+          * recommends that we clear any reserved CR4 bits.)
+          */
+         crosspage->crosspageData.wsCR0 &= ~CR0_RESERVED;
+         crosspage->crosspageData.wsCR0 |= (cr0reg & CR0_RESERVED);
 
-      if (vmx86_debug && !TaskInLongMode()) {
-         /* 32-bit switchNMI handlers require a data segment at %cs + 8. */
-         Descriptor      *hostGDT;
-         DTR              hostGDTR;
-         VMCrossPageData *cpData = &crosspage->crosspageData;
-         InterruptGate32 *idt    = (InterruptGate32 *)&cpData->switchHostIDT;
-         InterruptGate32 *nmi    = &idt[2];
-         Selector         nmiCS  = (Selector)nmi->segment;
-         Selector         nmiDS  = nmiCS + 8;
-         unsigned         csi    = SELECTOR_INDEX(nmiCS);
-         unsigned         dsi    = SELECTOR_INDEX(nmiDS);
-
-         (void) csi;              /* Silence MacOS compiler warning. */
-         (void) dsi;              /* Silence MacOS compiler warning. */
-
-         GET_GDT(hostGDTR);
-         TS_ASSERT(nmiDS + 7 <= hostGDTR.limit);
-
-         hostGDT = (Descriptor *)HOST_KERNEL_LA_2_VA(hostGDTR.offset);
-
-         TS_ASSERT(hostGDT[csi].present                     &&
-                   hostGDT[csi].DPL == 0                    &&
-                   hostGDT[csi].S                           &&
-                   Desc_GetBase(&hostGDT[csi]) == 0         &&
-                   Desc_GetLimit(&hostGDT[csi]) == 0xFFFFFU &&
-                   Desc_Gran(&hostGDT[csi])                 &&
-                   DT_NONCONFORMING_CODE(hostGDT[csi]));
-
-         TS_ASSERT(hostGDT[dsi].present                     &&
-                   hostGDT[dsi].DPL == 0                    &&
-                   hostGDT[dsi].S                           &&
-                   Desc_GetBase(&hostGDT[dsi]) == 0         &&
-                   Desc_GetLimit(&hostGDT[dsi]) == 0xFFFFFU &&
-                   Desc_Gran(&hostGDT[dsi])                 &&
-                   DT_WRITEABLE_DATA(hostGDT[dsi]));
-      }
-
-      TaskUpdatePTSCParameters(vm, &crosspage->crosspageData, vcpuid);
-
-      /* 
-       * Disable PEBS if it is supported and enabled.  Do this while on the 
-       * hosts IDT - PR 848701.
-       */
-      if (pebsAvailable) {
-         pebsMSR = __GET_MSR(IA32_MSR_PEBS_ENABLE);
-         if (pebsMSR != 0) {
-            __SET_MSR(IA32_MSR_PEBS_ENABLE, 0);
+         /*
+          * CR4.VMXE must be enabled to support VMX in the monitor, and it
+          * can't be cleared if it is set on the host.
+          */
+         if (crosspage->crosspageData.activateVMX || (cr4reg & CR4_VMXE) != 0) {
+            crosspage->crosspageData.wsCR4 |= CR4_VMXE;
          }
-      }
 
-      /*
-       * Save the host's standard IDT and set up an IDT that only
-       * space for all the hardware exceptions (though only a few are
-       * handled).
-       */
+         /*
+          * The world-switch CR4.MCE and CR4.PCIDE should always reflect the
+          * host's values.  CR4.PCIDE will be cleared once we're in the monitor,
+          * running on a CR3 with a PCID field of 0.
+          */
+         crosspage->crosspageData.wsCR4 =
+            (crosspage->crosspageData.wsCR4 & ~(CR4_MCE | CR4_PCIDE)) |
+            (cr4reg & (CR4_MCE | CR4_PCIDE));
 
-      TaskSaveIDT64(&hostIDT64);
-      TaskLoadIDT64(&crosspage->crosspageData.switchHostIDTR);
-      TaskTestCrossPageExceptionHandlers(crosspage);
+         /*
+          * The world-switch should never have global pages enabled.  Therefore,
+          * switching to the monitor's CR4 ensures that global pages are
+          * flushed.
+          */
+         ASSERT((crosspage->crosspageData.wsCR4 & CR4_PGE) == 0);
 
-#ifdef VM_X86_64
-      /*
-       * Clear PCID bits (or CR3.PCD and CR3.PWT bits).
-       */
-      if ((cr3reg & CR3_IGNORE) != 0) {
-         uintptr_t new_cr3 = cr3reg & ~CR3_IGNORE;
-         SET_CR3(new_cr3);
-      }
-#endif
+         /*
+          * Load the world-switch CR0 and CR4.  We can't load the monitor's
+          * CR3 yet, because the current code isn't mapped into the
+          * monitor's address space.
+          */
+         SET_CR0((uintptr_t)crosspage->crosspageData.wsCR0);
+         SET_CR4((uintptr_t)crosspage->crosspageData.wsCR4);
 
-      /*
-       * Following Intel's recommendation, we clear all the reserved
-       * bits in CR4.
-       *
-       * CR4.PGE is cleared to ensure global pages are flushed.
-       * CR4.PCIDE is cleared so that we can clear CR0.PG.
-       * CR4.SMEP is cleared as BackToHost is sometimes visible to CPL3.
-       */
-      new_cr4 = cr4reg & ~(CR4_PGE | CR4_PCIDE | CR4_SMEP | CR4_RESERVED);
-      SET_CR4(new_cr4);
+         TaskSaveDebugRegisters(crosspage);
 
-      crosspage->crosspageData.hostCR4 = new_cr4;
+         TaskSaveGDT64(&hostGDT64);
 
-      TaskSaveDebugRegisters(crosspage);
+         if (crosspage->crosspageData.activateVMX) {
+            MA vmxonRegion = MPN_2_MA(hvRootMPN);
+            VMXStatus status = VMXON_2_STATUS(&vmxonRegion);
+            if (status == VMX_Success) {
+               needVMXOFF = TRUE;
+            } else {
+               VMPTRST(&foreignVMCS);
+            }
+         }
 
-      TaskSaveGDT64(&hostGDT64);
+         if (crosspage->crosspageData.activateSVM) {
+            efer = __GET_MSR(MSR_EFER);
+            if ((efer & MSR_EFER_SVME) == 0) {
+               __SET_MSR(MSR_EFER, efer | MSR_EFER_SVME);
+            }
+            foreignHSAVE = __GET_MSR(MSR_VM_HSAVE_PA);
+            __SET_MSR(MSR_VM_HSAVE_PA, MPN_2_MA(hvRootMPN));
+         }
 
-      /*
-       * If NMI stress testing enabled, set EFLAGS<TF>.  This will
-       * make sure there is a valid IDT, GDT, stack, etc. at every
-       * instruction boundary during the switch.
-       */
+         /*
+          * If NMI stress testing enabled, set EFLAGS<TF>.  This will
+          * make sure there is a valid IDT, GDT, stack, etc. at every
+          * instruction boundary during the switch.
+          */
+         if (WS_NMI_STRESS) {
+            TaskEnableTF();
+         }
 
-      if (WS_NMI_STRESS) {
-         TaskEnableTF();
-      }
+         /*
+          * If this section is enabled, it will send the host an NMI via
+          * the local APIC to make sure it really can handle NMIs.
+          */
+         if (FALSE && vmx86_debug) {
+            uint32 timeout;
+            static uint32 counter = 0;
 
-      /*
-       * If this section is enabled, it will send the host an NMI via
-       * the local APIC to make sure it really can handle NMIs.
-       */
-
-      if (FALSE && vmx86_debug) {
-         uint32 timeout;
-         static uint32 counter = 0;
-
-         if (++counter >= 100000) {
-            counter = 0;
-            TaskSetException(crosspage, EXC_NMI, FALSE); // no NMI seen
-            if (!vm->hostAPIC.isX2) {   // We don't need to wait in X2APIC mode
-               for (timeout = 0; --timeout != 0;) { // wait for LAPIC idle
-                  if (!(APIC_Read(&vm->hostAPIC, APICR_ICRLO)
+            if (++counter >= 100000) {
+               counter = 0;
+               TaskSetException(crosspage, EXC_NMI, FALSE); // no NMI seen
+               if (!vm->hostAPIC.isX2) {   // Don't need to wait in X2APIC mode
+                  for (timeout = 0; --timeout != 0;) { // wait for LAPIC idle
+                     if (!(APIC_Read(&vm->hostAPIC, APICR_ICRLO)
                            & APIC_ICRLO_STATUS_MASK)) {
+                        break;
+                     }
+                  }
+               }
+               TS_ASSERT(timeout != 0);
+               // send NMI to self - (shorthand doesn't work)
+               APIC_WriteICR(
+                  &vm->hostAPIC,
+                  APIC_ReadID(&vm->hostAPIC),
+                  (  (EXC_NMI << APIC_ICRLO_VECTOR_OFFSET)
+                     & APIC_ICRLO_VECTOR_MASK)
+                  | (  (APIC_DELMODE_NMI << APIC_ICRLO_DELMODE_OFFSET)
+                       & APIC_ICRLO_DELMODE_MASK));
+               for (timeout = 0; --timeout != 0;) {   // wait for NMI delivery
+                  if (TaskGotException(crosspage, EXC_NMI)) {
                      break;
                   }
                }
+               TS_ASSERT(timeout != 0);
             }
-            TS_ASSERT(timeout != 0);
-            // send NMI to self - (shorthand doesn't work)
-            APIC_WriteICR(
-               &vm->hostAPIC,
-               APIC_ReadID(&vm->hostAPIC),
-                 (  (EXC_NMI << APIC_ICRLO_VECTOR_OFFSET)
-                  & APIC_ICRLO_VECTOR_MASK)
-               | (  (APIC_DELMODE_NMI << APIC_ICRLO_DELMODE_OFFSET)
-                  & APIC_ICRLO_DELMODE_MASK));
-            for (timeout = 0; --timeout != 0;) {   // wait for NMI delivery
-               if (TaskGotException(crosspage, EXC_NMI)) {
-                  break;
-               }
+         }
+
+         /*
+          * If this section is enabled, it will force an NMI loop on each
+          * switch so we can test each callback to make sure it can
+          * survive a loop.
+          */
+         if (FALSE && vmx86_debug) {
+            if (!loopForced) {
+               loopForced = TRUE;
+               TaskSetException(crosspage, EXC_NMI, TRUE);
             }
-            TS_ASSERT(timeout != 0);
          }
-      }
 
-      /*
-       * If this section is enabled, it will force an NMI loop on each
-       * switch so we can test each callback to make sure it can
-       * survive a loop.
-       */
-
-      if (FALSE && vmx86_debug) {
-         if (!loopForced) {
-            loopForced = TRUE;
-            TaskSetException(crosspage, EXC_NMI, TRUE);
-         }
-      }
-
-      /*
-       * GS and FS are saved outside of the TaskSwitchToMonitor() code to
-       *
-       * 1) minimize the amount of code handled there, and
-       *
-       * 2) prevent us from faulting if they happen to be in the LDT
-       *    (since the LDT is saved and restored here too).
-       *
-       * Also, the 32-bit Mac OS running in legacy mode has
-       * CS, DS, ES, SS in the LDT!
-       */
-
-      cs = GET_CS();
-      ss = GET_SS();
-#if defined __APPLE__ && vm_x86_64
-      /*
-       * The 64-bit Mac OS kernel leaks segment selectors from
-       * other threads into 64-bit threads.  When the selectors
-       * reference a foreign thread's LDT, we may not be able to
-       * reload them using our thread's LDT.  So, let's just clear
-       * them instead of trying to preserve them.  [PR 467140]
-       */
-
-      ds = 0;
-      es = 0;
-      fs = 0;
-      gs = 0;
+         /*
+          * GS and FS are saved outside of the TaskSwitchToMonitor() code to
+          *
+          * 1) minimize the amount of code handled there, and
+          *
+          * 2) prevent us from faulting if they happen to be in the LDT
+          *    (since the LDT is saved and restored here too).
+          *
+          * Also, the 32-bit Mac OS running in legacy mode has
+          * CS, DS, ES, SS in the LDT!
+          */
+         cs = GET_CS();
+         ss = GET_SS();
+#if defined __APPLE__
+         /*
+          * The 64-bit Mac OS kernel leaks segment selectors from
+          * other threads into 64-bit threads.  When the selectors
+          * reference a foreign thread's LDT, we may not be able to
+          * reload them using our thread's LDT.  So, let's just clear
+          * them instead of trying to preserve them.  [PR 467140]
+          */
+         ds = 0;
+         es = 0;
+         fs = 0;
+         gs = 0;
 #else
-      ds = GET_DS();
-      es = GET_ES();
-      fs = GET_FS();
-      gs = GET_GS();
+         ds = GET_DS();
+         es = GET_ES();
+         fs = GET_FS();
+         gs = GET_GS();
 #endif
-      GET_LDT(hostLDT);
-      GET_TR(hostTR);
+         GET_LDT(hostLDT);
+         GET_TR(hostTR);
 
-      if (TaskInLongMode()) {
          kgs64 = GET_KernelGS64();
          gs64  = GET_GS64();
          fs64  = GET_FS64();
-      }
 
-      /*
-       * Make sure stack segment is non-zero so worldswitch can use it
-       * to temporarily restore DS,ES on return.
-       */
-
-      if (vm_x86_64 && (ss == 0)) {
-         SET_SS(kernelStackSegment);
-      }
-
-#if defined __APPLE__ && !vm_x86_64
-      if (!TaskInLongMode()) {
          /*
-          * This is 32-bit Mac OS running in legacy mode, which has an
-          * LDT-based CS,DS,SS.  So switch to GDT segments as the worldswitch
-          * must have segments that are in the crossGDT so the segments will
-          * remain valid throughout worldswitching.
+          * Make sure stack segment is non-zero so worldswitch can use it
+          * to temporarily restore DS,ES on return.
           */
+         if (ss == 0) {
+            SET_SS(kernelStackSegment);
+         }
 
-         if (SELECTOR_TABLE(cs) == SELECTOR_LDT) {
-            __asm__ __volatile__("pushl %0"  "\n\t"
-                                 "pushl $1f" "\n\t"
-                                 "lretl"     "\n"
-                                 "1:"
-                                 :
-                                 : "i" (KERNEL32_CS));
-         }
-         if (SELECTOR_TABLE(ds) == SELECTOR_LDT) {
-            SET_DS(KERNEL32_DS);
-         }
-         if (SELECTOR_TABLE(ss) == SELECTOR_LDT) {
-            SET_SS(KERNEL32_DS);
-         }
-      } else
-#endif
-      {
          TS_ASSERT(SELECTOR_TABLE(cs) == SELECTOR_GDT);
          TS_ASSERT(SELECTOR_TABLE(ds) == SELECTOR_GDT);
          TS_ASSERT(SELECTOR_TABLE(ss) == SELECTOR_GDT);
-      }
 
-      DEBUG_ONLY(crosspage->crosspageData.tinyStack[0] = 0xDEADBEEF;)
-      TaskSwitchToMonitor(crosspage);
-      TS_ASSERT(crosspage->crosspageData.tinyStack[0] == 0xDEADBEEF);
+         DEBUG_ONLY(crosspage->crosspageData.tinyStack[0] = 0xDEADBEEF;)
+            TaskSwitchToMonitor(crosspage);
+         TS_ASSERT(crosspage->crosspageData.tinyStack[0] == 0xDEADBEEF);
 
-      /*
-       * Restore CR state.  The monitor shouldn't have modified CR8.
-       */
-
-      SET_CR0(cr0reg);
-      SET_CR2(cr2reg);
-      SET_CR4(cr4reg);
-#ifdef VM_X86_64
-      if ((cr3reg & CR3_IGNORE) != 0) {
-         SET_CR3(cr3reg);
-      }
-#endif
-
-      /*
-       * TaskSwitchToMonitor() returns with GDT = crossGDT so switch back to
-       * the host GDT here.  We will also restore host TR as the task busy bit
-       * needs to be fiddled with.  Also restore host LDT while we're at it.
-       */
-
-      TaskRestoreHostGDTTRLDT(tempGDTBase, crosspage, hostGDT64,
-                              hostLDT, cs, hostTR);
-
-#if defined __APPLE__ && !vm_x86_64
-      if (!TaskInLongMode()) {
-         if (SELECTOR_TABLE(cs) == SELECTOR_LDT) {
-            __asm__ __volatile__("pushl %0"  "\n\t"
-                                 "pushl $1f" "\n\t"
-                                 "lretl"     "\n"
-                                 "1:"
-                                 :
-                                 : "g" ((uint32)cs));
+         if (needVMXOFF) {
+            VMXOFF();
+         } else if (foreignVMCS != ~0ULL) {
+            VMPTRLD_UNCHECKED(&foreignVMCS);
          }
-         if (SELECTOR_TABLE(ss) == SELECTOR_LDT) {
-            SET_SS(ss);
+
+         if (crosspage->crosspageData.activateSVM) {
+            __SET_MSR(MSR_VM_HSAVE_PA, foreignHSAVE);
+            if ((efer & MSR_EFER_SVME) == 0) {
+               __SET_MSR(MSR_EFER, efer);
+            }
          }
-      }
-#endif
 
-      SET_DS(ds);
-      SET_ES(es);
+         /*
+          * Restore CR state.
+          * CR3 should already have been restored.  CR0 and CR4 have to
+          * be restored if the world switch values do not match the host's.
+          * CR2 always has to be restored.  CR8 never has to be restored.
+          */
+         SET_CR2(cr2reg);
+         if (crosspage->crosspageData.wsCR0 != cr0reg) {
+            SET_CR0(cr0reg);
+         }
+         if (crosspage->crosspageData.wsCR4 != cr4reg) {
+            SET_CR4(cr4reg);
+         } else if ((cr4reg & CR4_PCIDE) != 0) {
+            /*
+             * Flush PCID 0.
+             */
+            ASSERT((cr4reg & CR4_PGE) == 0);
+            SET_CR4(cr4reg | CR4_PGE);
+            SET_CR4(cr4reg);
+         }
+         if (vmx86_debug) {
+            uintptr_t cr;
+            GET_CR0(cr);
+            ASSERT(cr == cr0reg);
+            GET_CR4(cr);
+            ASSERT(cr == cr4reg);
+            GET_CR3(cr);
+            ASSERT(cr == cr3reg);
+         }
 
-      /*
-       * First, restore %fs and %gs from the in-memory descriptor tables,
-       * and then overwrite the bases in the descriptor cache with the
-       * saved 64-bit values.
-       */
+         /*
+          * TaskSwitchToMonitor() returns with GDT = crossGDT so switch back to
+          * the host GDT here.  We will also restore host TR as the task busy
+          * bit needs to be fiddled with.  Also restore host LDT while we're
+          * at it.
+          */
+         TaskRestoreHostGDTTRLDT(tempGDTBase, crosspage, hostGDT64,
+                                 hostLDT, cs, hostTR);
 
-      SET_FS(fs);
-      SET_GS(gs);
-      if (TaskInLongMode()) {
+         SET_DS(ds);
+         SET_ES(es);
+
+         /*
+          * First, restore %fs and %gs from the in-memory descriptor tables,
+          * and then overwrite the bases in the descriptor cache with the
+          * saved 64-bit values.
+          */
+
+         SET_FS(fs);
+         SET_GS(gs);
          SET_FS64(fs64);
          SET_GS64(gs64);
          SET_KernelGS64(kgs64);
-      }
 
-      /* Restore debug registers and host's IDT; turn off stress test. */
-      if (WS_NMI_STRESS) {
-         TaskDisableTF();
-      }
-
-      TaskRestoreDebugRegisters(&crosspage->crosspageData);
-
-      ASSERT_NO_INTERRUPTS();
-
-      /*
-       * Restore standard host interrupt table and re-enable PEBS afterwards 
-       * iff we disabled it.
-       */
-
-      TaskLoadIDT64(&hostIDT64);
-
-      if (pebsMSR != 0) {
-         __SET_MSR(IA32_MSR_PEBS_ENABLE, pebsMSR);
-      }
-
-      TaskUpdateLatestPTSC(vm, &crosspage->crosspageData);
-      vm->currentHostCpu[vcpuid] = INVALID_PCPU;
-      
-      /*
-       * If we got an NMI, do an INT 2 so the host will see it.  Theoretically,
-       * since the switchNMI handlers return with POPF/LRET instead of IRET,
-       * and we don't execute any IRET, NMI delivery should still be inhibited
-       * by the PCPU.  So using an INT 2 to forward the NMI to the host should
-       * work as NMI delivery is still inhibited.
-       *
-       * Don't bother with the INT 2 if stress testing or the host (Linux
-       * anyway) will bleep out a log message each time.
-       *
-       * Likewise, if MCE, do an INT 18.
-       */
-
-      if (UNLIKELY(TaskGotException(crosspage, EXC_NMI))) {
-         TaskSetException(crosspage, EXC_NMI, FALSE);
-         if (!WS_NMI_STRESS && !loopForced) {
-            RAISE_INTERRUPT(EXC_NMI);
+         /* Restore debug registers and host's IDT; turn off stress test. */
+         if (WS_NMI_STRESS) {
+            TaskDisableTF();
          }
-      }
 
-      if (UNLIKELY(TaskGotException(crosspage, EXC_MC))) {
-         TaskSetException(crosspage, EXC_MC, FALSE);
-         if (!WS_NMI_STRESS && !loopForced) {
-            if (vmx86_debug) {
-               CP_PutStr("Task_Switch*: forwarding MCE to host\n");
+         TaskRestoreDebugRegisters(&crosspage->crosspageData);
+
+         ASSERT_NO_INTERRUPTS();
+
+         /*
+          * Restore standard host interrupt table and re-enable PEBS afterwards
+          * iff we disabled it.
+          */
+
+         TaskLoadIDT64(&hostIDT64);
+
+         if (pebsMSR != 0) {
+            __SET_MSR(IA32_MSR_PEBS_ENABLE, pebsMSR);
+         }
+
+         TaskUpdateLatestPTSC(vm, &crosspage->crosspageData);
+         vm->currentHostCpu[vcpuid] = INVALID_PCPU;
+
+         /*
+          * If we got an NMI, do an INT 2 so the host will see it.
+          * Theoretically, since the switchNMI handlers return with
+          * POPF/LRET instead of IRET, and we don't execute any IRET
+          * (unless we need to change VIF/VIP -- see BackToHost), NMI
+          * delivery should still be inhibited by the PCPU.  So using an
+          * INT 2 to forward the NMI to the host should work as NMI
+          * delivery is still inhibited.
+          *
+          * Don't bother with the INT 2 if stress testing or the host (Linux
+          * anyway) will bleep out a log message each time.
+          *
+          * Likewise, if MCE, do an INT 18.
+          */
+
+         if (UNLIKELY(TaskGotException(crosspage, EXC_NMI))) {
+            TaskSetException(crosspage, EXC_NMI, FALSE);
+            if (!WS_NMI_STRESS && !loopForced) {
+               RAISE_INTERRUPT(EXC_NMI);
             }
-            RAISE_INTERRUPT(EXC_MC);
          }
-      }
 
-      /*
-       * It is possible that the gotNMI and/or gotMCE was detected when
-       * switching in the host->monitor direction, in which case the
-       * retryWorldSwitch flag will be set.  If such is the case, we want to
-       * immediately loop back to the monitor as that is what it is expecting
-       * us to do.
-       */
-
-      if (LIKELY(!crosspage->crosspageData.retryWorldSwitch)) {
-         break;
-      }
-      crosspage->crosspageData.retryWorldSwitch = FALSE;
+         if (UNLIKELY(TaskGotException(crosspage, EXC_MC))) {
+            TaskSetException(crosspage, EXC_MC, FALSE);
+            if (!WS_NMI_STRESS && !loopForced) {
+               if (vmx86_debug) {
+                  CP_PutStr("Task_Switch*: forwarding MCE to host\n");
+               }
+               RAISE_INTERRUPT(EXC_MC);
+            }
+         }
+      } while (UNLIKELY(TaskShouldRetryWorldSwitch(crosspage)));
    }
 
    if (crosspage->crosspageData.moduleCallType == MODULECALL_INTR) {
@@ -2619,9 +2163,9 @@ Task_Switch(VMDriver *vm,  // IN
            crosspage->crosspageData.args[0] == EXC_MC)) {
          RAISE_INTERRUPT(crosspage->crosspageData.args[0]);
       } else {
-         Warning("%s: Received Unexpected Interrupt: 0x%X\n",
+         Warning("%s: Received Unexpected Interrupt: 0x%"FMT64"X\n",
                  __FUNCTION__, crosspage->crosspageData.args[0]);
-         Panic("Received Unexpected Interrupt: 0x%X\n",
+         Panic("Received Unexpected Interrupt: 0x%"FMT64"X\n",
                crosspage->crosspageData.args[0]);
       }
 #else
@@ -2675,9 +2219,9 @@ Task_Switch(VMDriver *vm,  // IN
           * with int 0xD1 0x61 ...
           */
 
-         Warning("%s: Received Unexpected Interrupt: 0x%X\n",
+         Warning("%s: Received Unexpected Interrupt: 0x%"FMT64"X\n",
                  __FUNCTION__, crosspage->crosspageData.args[0]);
-         Panic("Received Unexpected Interrupt: 0x%X\n",
+         Panic("Received Unexpected Interrupt: 0x%"FMT64"X\n",
                crosspage->crosspageData.args[0]);
       }
 #endif

@@ -1,5 +1,5 @@
 /*********************************************************
- * Copyright (C) 1998 VMware, Inc. All rights reserved.
+ * Copyright (C) 1998,2014 VMware, Inc. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License as published by the
@@ -54,15 +54,11 @@
 #define PHYSTRACK_L1_ENTRIES (PHYSTRACK_MAX_SUPPORTED_GB * 8)
 #elif defined(__linux__)
 #define PHYSTRACK_L2_ENTRIES (BYTES_PER_ENTRY / sizeof(void *)) /* 64GB or 128GB */
-#ifdef VM_X86_64
 /*
  * Currently MPN is 32 bits.  15 bits are in L3, 9 bits are in L2,
  * leaving 8 bits for L1...
  */
 #define PHYSTRACK_L1_ENTRIES (256) /* 16TB. */
-#else
-#define PHYSTRACK_L1_ENTRIES (9)   /* 1TB.  Most probably impossible... */
-#endif
 #else
 #define PHYSTRACK_L1_ENTRIES ((128 + 4) * 8) /* 128 GB */
 #endif
@@ -93,13 +89,21 @@ typedef struct PhysTracker {
 
 /*
  * Convert MPN to p1, p2, and p3 indices.  p1/p2/p3 must be l-values.
+ * Currently we support a 64 bit container for an MPN
+ * in hosted but not an actual 64 bit value as no hosted OS
+ * supports this yet. Hence in PhysMem tracker we are deliberately using
+ * a 32-bit container to save memory. Also the tracker is allocating pages
+ * considering the MPN to be a 32 bit value. This will change once we get
+ * systems supporting 64 bit memory/addressing space.
+ * Until then let us assert if a value greater than 32 bit is being passed.
  */
-#define PHYSTRACK_MPN2IDX(mpn, p1, p2, p3) \
-   do {                                    \
-      p2 = (mpn) / PHYSTRACK_L3_ENTRIES;   \
-      p1 = p2 / PHYSTRACK_L2_ENTRIES;      \
-      p2 = p2 % PHYSTRACK_L2_ENTRIES;      \
-      p3 = (mpn) % PHYSTRACK_L3_ENTRIES;   \
+#define PHYSTRACK_MPN2IDX(mpn, p1, p2, p3)           \
+   do {                                              \
+      ASSERT((mpn >> 32) == 0);                      \
+      p2 = (unsigned)(mpn) / PHYSTRACK_L3_ENTRIES;   \
+      p1 = p2 / PHYSTRACK_L2_ENTRIES;                \
+      p2 = p2 % PHYSTRACK_L2_ENTRIES;                \
+      p3 = (unsigned)(mpn) % PHYSTRACK_L3_ENTRIES;   \
    } while (0)
 
 /*
@@ -197,9 +201,7 @@ PhysTrackFreeL3(PhysTrackerL2 *dir2,
  *      Create new PhysTracker.
  *
  * Results:
- *      
  *      Creates new PhysTracker.
- *      
  *
  * Side effects:
  *      None.
@@ -235,11 +237,8 @@ PhysTrack_Alloc(VMDriver *vm)
  *      module deallocation
  *
  * Results:
- *      
  *      reallocates all structures, including 'tracker'
- *      
- *      
- *
+ *     
  * Side effects:
  *      tracker deallocated
  *
@@ -290,7 +289,6 @@ PhysTrack_Free(PhysTracker *tracker)
  *      add a page to the core map tracking.
  *
  * Results:
- *      
  *      void
  *
  * Side effects:
@@ -300,8 +298,8 @@ PhysTrack_Free(PhysTracker *tracker)
  */
 
 void
-PhysTrack_Add(PhysTracker *tracker,
-              MPN mpn)
+PhysTrack_Add(PhysTracker *tracker, // IN/OUT
+              MPN64 mpn)            // IN: MPN of page to be added
 {
    unsigned int p1;
    unsigned int p2;
@@ -317,11 +315,11 @@ PhysTrack_Add(PhysTracker *tracker,
    ASSERT(p1 < PHYSTRACK_L1_ENTRIES);
 
    dir2 = tracker->dir[p1];
-   if (!dir2) { 
+   if (!dir2) {
       // more efficient with page alloc
       ASSERT_ON_COMPILE(sizeof *dir2 == PAGE_SIZE);
       dir2 = HostIF_AllocPage();
-      if (!dir2) { 
+      if (!dir2) {
          PANIC();
       }
       memset(dir2, 0, sizeof *dir2);
@@ -344,7 +342,6 @@ PhysTrack_Add(PhysTracker *tracker,
  *      remove a page from the core map tracking
  *
  * Results:
- *      
  *      void
  *
  * Side effects:
@@ -354,8 +351,8 @@ PhysTrack_Add(PhysTracker *tracker,
  */
 
 void
-PhysTrack_Remove(PhysTracker *tracker,
-                 MPN mpn)
+PhysTrack_Remove(PhysTracker *tracker, // IN/OUT
+                 MPN64 mpn)            // IN: MPN of page to be removed.
 {
    unsigned int p1;
    unsigned int p2;
@@ -394,10 +391,8 @@ PhysTrack_Remove(PhysTracker *tracker,
  *      tests whether a page is being tracked
  *
  * Results:
- *      
  *      TRUE if the page is tracked
  *      FALSE otherwise
- *      
  *
  * Side effects:
  *      None.
@@ -406,8 +401,8 @@ PhysTrack_Remove(PhysTracker *tracker,
  */
 
 Bool
-PhysTrack_Test(const PhysTracker *tracker,
-               MPN mpn)
+PhysTrack_Test(const PhysTracker *tracker, // IN
+               MPN64 mpn)                  // IN: MPN of page to be tested.
 {
    unsigned int p1;
    unsigned int p2;
@@ -444,10 +439,8 @@ PhysTrack_Test(const PhysTracker *tracker,
  *      Return next tracked page
  *
  * Results:
- *      
- *      MPN         when some tracked page was found
- *      INVALID_MPN otherwise
- *      
+ *      MPN when some tracked page was found
+ *      INVALID_MPN otherwise.
  *
  * Side effects:
  *      None.
@@ -455,16 +448,19 @@ PhysTrack_Test(const PhysTracker *tracker,
  *----------------------------------------------------------------------
  */
 
-MPN
-PhysTrack_GetNext(const PhysTracker *tracker,
-                  MPN mpn)
+MPN64
+PhysTrack_GetNext(const PhysTracker *tracker, // IN
+                  MPN64 mpn)                  // IN: MPN of page to be tracked.
 {
    unsigned int p1;
    unsigned int p2;
    unsigned int p3;
 
-   mpn++; /* We want the next MPN. */
-
+   if (mpn == INVALID_MPN) {
+      mpn = 0; /* First iteration. */
+   } else {
+      mpn++;   /* We want the next MPN. */
+   }
    PHYSTRACK_MPN2IDX(mpn, p1, p2, p3);
 
    ASSERT(tracker);

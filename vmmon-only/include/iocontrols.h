@@ -1,5 +1,5 @@
 /*********************************************************
- * Copyright (C) 1998-2011 VMware, Inc. All rights reserved.
+ * Copyright (C) 1998-2014 VMware, Inc. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License as published by the
@@ -134,7 +134,7 @@ PtrToVA64(void const *ptr) // IN
  *
  */
 
-#define VMMON_VERSION           (279 << 16 | 0)
+#define VMMON_VERSION           (304 << 16 | 0)
 #define VMMON_VERSION_MAJOR(v)  ((uint32) (v) >> 16)
 #define VMMON_VERSION_MINOR(v)  ((uint16) (v))
 
@@ -144,7 +144,7 @@ PtrToVA64(void const *ptr) // IN
  */
 
 #ifdef VMX86_SERVER
-#define MAX_VMS	128
+#define MAX_VMS 128
 #else
 #define MAX_VMS 64
 #endif
@@ -218,11 +218,6 @@ enum IOCTLCmd {
    IOCTLCMD(UPDATE_MEM_INFO),
    IOCTLCMD(READMIT),
    IOCTLCMD(PAE_ENABLED),
-#ifndef __APPLE__
-   IOCTLCMD(HOST_X86_64),
-#else
-   IOCTLCMD(HOST_X86_CM),
-#endif
    IOCTLCMD(GET_TOTAL_MEM_USAGE),
    IOCTLCMD(GET_KHZ_ESTIMATE),
    IOCTLCMD(SET_HOST_CLOCK_RATE),
@@ -236,7 +231,6 @@ enum IOCTLCmd {
    IOCTLCMD(GET_NEXT_ANON_PAGE),
    IOCTLCMD(GET_LOCKED_PAGES_LIST),
 
-   IOCTLCMD(ENABLE_HV),
    IOCTLCMD(GET_ALL_MSRS),
 
    IOCTLCMD(COUNT_PRESENT_PAGES),
@@ -358,7 +352,6 @@ enum IOCTLCmd {
 #define IOCTL_VMX86_READMIT             VMIOCTL_BUFFERED(READMIT)
 #define IOCTL_VMX86_UPDATE_MEM_INFO     VMIOCTL_BUFFERED(UPDATE_MEM_INFO)
 #define IOCTL_VMX86_PAE_ENABLED         VMIOCTL_BUFFERED(PAE_ENABLED)
-#define IOCTL_VMX86_HOST_X86_64         VMIOCTL_BUFFERED(HOST_X86_64)
 #define IOCTL_VMX86_BEEP                VMIOCTL_BUFFERED(BEEP)
 #define IOCTL_VMX86_HARD_LIMIT_MONITOR_STATUS   VMIOCTL_BUFFERED(HARD_LIMIT_MONITOR_STATUS)
 #define IOCTL_VMX86_CHANGE_HARD_LIMIT   VMIOCTL_BUFFERED(CHANGE_HARD_LIMIT)
@@ -384,7 +377,6 @@ enum IOCTLCmd {
 
 #define IOCTL_VMX86_REMEMBER_KHZ_ESTIMATE VMIOCTL_BUFFERED(REMEMBER_KHZ_ESTIMATE)
 
-#define IOCTL_VMX86_ENABLE_HV           VMIOCTL_BUFFERED(ENABLE_HV)
 #define IOCTL_VMX86_GET_ALL_MSRS        VMIOCTL_BUFFERED(GET_ALL_MSRS)
 #define IOCTL_VMX86_COUNT_PRESENT_PAGES	VMIOCTL_BUFFERED(COUNT_PRESENT_PAGES)
 
@@ -484,16 +476,20 @@ enum IOCTLCmd {
 typedef
 #include "vmware_pack_begin.h"
 struct VMLockPageRet {
-   MPN mpn;      // OUT: MPN
-   int32 status; // OUT: PAGE_* status code
+   MPN64 mpn;      // OUT: MPN
+   int32 status;   // OUT: PAGE_* status code
 }
 #include "vmware_pack_end.h"
 VMLockPageRet;
 
-typedef union {
+typedef
+#include "vmware_pack_begin.h"
+union {
    VA64 uAddr;        // IN: user address
    VMLockPageRet ret; // OUT: status code and MPN
-} VMLockPage;
+}
+#include "vmware_pack_end.h"
+VMLockPage;
 
 
 typedef struct VMAPICInfo {
@@ -546,31 +542,21 @@ typedef struct VMMemMgmtInfo {
    uint32          anonymous;       // vmm memory
    uint32          mainMemSize;     // guest main memory size
    uint32          locked;          // number of pages locked by this vm
-   uint32          shared;          // number of pages shared by vmmon
-   uint32          sharedUsr;       // number of pages shared by vmx (appox.)
    uint32          perVMOverhead;   // memory for vmx/vmmon overheads
-   uint32          breaksAvg;       // average number of broken COW pages
-   Percent         sharedPctAvg;    // average success rate of page sharing
    Percent         touchedPct;      // % of guest memory being touched
    Percent         dirtiedPct;      // % of guest memory being dirtied
    Bool            admitted;        // admission control
-   uint32          _pad;            // for alignment of 64-bit fields
-   PShare_MgmtInfo pshareMgmtInfo;  // management info for pshare scan rates
+   uint8           _pad;            // for alignment of 64-bit fields
    uint64          hugePageBytes;   // number of bytes occupied by huge pages
    uint64          timestamp;       // most recent poll of get mem info time
 } VMMemMgmtInfo;
 
 typedef struct VMMemMgmtInfoPatch {
-   uint32          sharedAll;       // number of pages shared by vmmon and vmx
-   uint32          breaksAvg;       // average number of broken COW pages
-   Percent         sharedPctAvg;    // average success rate of page sharing
    Percent         touchedPct;      // % of guest memory being touched
    Percent         dirtiedPct;      // % of guest memory being dirtied
-   uint8           _pad[5];
+   uint8           _pad[6];
    uint64          hugePageBytes;
 } VMMemMgmtInfoPatch;
-
-#define VMMEM_COW_HOT_PAGES 10
 
 /*
  * See comment on padding and size/layout constraints above when
@@ -594,15 +580,15 @@ typedef struct VMMemInfoArgs {
    (sizeof(VMMemInfoArgs) - sizeof(VMMemMgmtInfo) + (numVMs) * sizeof(VMMemMgmtInfo))
 
 typedef struct VMMPNNext {
-   MPN       inMPN;   // IN 
-   MPN       outMPN;  // OUT
+   MPN64       inMPN;   // IN
+   MPN64       outMPN;  // OUT
 } VMMPNNext;
 
 typedef struct VMMPNList {
    uint32    mpnCount;   // IN (and OUT on Mac OS)
    Bool      ignoreLimits;
    uint8     _pad[3];
-   VA64      mpn32List;  // IN: User VA of an array of 32-bit MPNs.
+   VA64      mpn64List;  // IN: User VA of an array of 64-bit MPNs.
 } VMMPNList;
 
 typedef struct VARange {
@@ -613,14 +599,12 @@ typedef struct VARange {
 } VARange;
 
 typedef struct VMMUnlockPageByMPN {
-   MPN32     mpn;
-   uint32    pad;
-   VA64      uAddr;	    /* IN: User VA of the page (optional). */
+   MPN64     mpn;
+   VA64      uAddr;         /* IN: User VA of the page (optional). */
 } VMMUnlockPageByMPN;
 
 typedef struct VMMReadWritePage {
-   MPN32        mpn; // IN
-   uint32       pad;
+   MPN64        mpn;   // IN
    VA64         uAddr; // IN: User VA of a PAGE_SIZE-large buffer.
 } VMMReadWritePage;
 
@@ -660,9 +644,10 @@ typedef struct IPIVectors {
     */
    uint8 hostIPIVectors[2];
    /* 
-    * Vector we have allocated or stolen for the monitor interrupts.
+    * Vectors we have allocated or stolen for the monitor interrupts.
     */
    uint8 monitorIPIVector; 
+   uint8 hvIPIVector;
 } IPIVectors;
 
 #endif
@@ -684,29 +669,29 @@ typedef struct InitCrossGDT {
  * macros to marshall real arguments to mmap's made-up 'offset' argument.
  */
 
-#define VMMON_MAP_MT_LOW4GB	0
-#define VMMON_MAP_MT_LOW16MB	1
-#define VMMON_MAP_MT_ANY	2
+#define VMMON_MAP_MT_LOW4GB     0
+#define VMMON_MAP_MT_LOW16MB    1
+#define VMMON_MAP_MT_ANY        2
 
-#define VMMON_MAP_OFFSET_SHIFT	0
-#define VMMON_MAP_OFFSET_MASK	0x00000FFF
-#define VMMON_MAP_ORDER_SHIFT	12
-#define VMMON_MAP_ORDER_MASK	0xF
-#define VMMON_MAP_MT_SHIFT	16
-#define VMMON_MAP_MT_MASK	0x7
-#define VMMON_MAP_RSVD_SHIFT	19
+#define VMMON_MAP_OFFSET_SHIFT  0
+#define VMMON_MAP_OFFSET_MASK   0x00000FFF
+#define VMMON_MAP_ORDER_SHIFT   12
+#define VMMON_MAP_ORDER_MASK    0xF
+#define VMMON_MAP_MT_SHIFT      16
+#define VMMON_MAP_MT_MASK       0x7
+#define VMMON_MAP_RSVD_SHIFT    19
 
-#define VMMON_MAP_RSVD(base)	\
-		((base) >> VMMON_MAP_RSVD_SHIFT)
-#define VMMON_MAP_MT(base)	\
-		(((base) >> VMMON_MAP_MT_SHIFT) & VMMON_MAP_MT_MASK)
-#define VMMON_MAP_ORDER(base)	\
-		(((base) >> VMMON_MAP_ORDER_SHIFT) & VMMON_MAP_ORDER_MASK)
-#define VMMON_MAP_OFFSET(base)	\
-		(((base) >> VMMON_MAP_OFFSET_SHIFT) & VMMON_MAP_OFFSET_MASK)
+#define VMMON_MAP_RSVD(base)    \
+                ((base) >> VMMON_MAP_RSVD_SHIFT)
+#define VMMON_MAP_MT(base)      \
+                (((base) >> VMMON_MAP_MT_SHIFT) & VMMON_MAP_MT_MASK)
+#define VMMON_MAP_ORDER(base)   \
+                (((base) >> VMMON_MAP_ORDER_SHIFT) & VMMON_MAP_ORDER_MASK)
+#define VMMON_MAP_OFFSET(base)  \
+                (((base) >> VMMON_MAP_OFFSET_SHIFT) & VMMON_MAP_OFFSET_MASK)
 
-#define VMMON_MAP_BASE(mt, order)	(((mt) << VMMON_MAP_MT_SHIFT) | \
-					 ((order) << VMMON_MAP_ORDER_SHIFT))
+#define VMMON_MAP_BASE(mt, order)   (((mt) << VMMON_MAP_MT_SHIFT) | \
+                                     ((order) << VMMON_MAP_ORDER_SHIFT))
 
 #elif defined _WIN32
 /*
@@ -714,11 +699,10 @@ typedef struct InitCrossGDT {
  */
 
 typedef struct VMAllocContiguousMem {
-   VA64   mpn32List;  // IN: User VA of an array of 32-bit MPNs.
+   VA64   mpn64List;// IN: User VA of an array of 64-bit MPNs.
    uint32 mpnCount; // IN
    uint32 order;    // IN
-   MPN32  maxMPN;   // IN
-   uint32 _pad[1];
+   MPN64  maxMPN;   // IN
 } VMAllocContiguousMem;
 #elif defined __APPLE__
 #   include "iocontrolsMacos.h"

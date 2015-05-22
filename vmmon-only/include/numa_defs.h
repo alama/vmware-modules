@@ -34,6 +34,7 @@
 
 #include "includeCheck.h"
 #include "vm_basic_types.h"
+#include "vm_basic_defs.h"
 #include "cpu_defs.h"
 
 /* Machine NUMA nodes */
@@ -56,14 +57,14 @@ typedef uint8  NUMA_MemRangeID;
  * Structures
  */
 typedef struct {
-   MPN          startMPN;
-   MPN          endMPN;
+   MPN64        startMPN;
+   MPN64        endMPN;
    NUMA_Node    id;
    Bool         isReliable;
 } NUMA_MemRange;
 
 typedef struct NUMA_MemRangesList {
-   int           numMemRanges;
+   uint64        numMemRanges;
    NUMA_MemRange memRange[NUMA_MAX_MEM_RANGES];
 } NUMA_MemRangesList;
 

@@ -36,7 +36,7 @@
 
 #include "monitorAction_exported.h"
 
-#define MAX_INTERRUPT_VECTORS          256
+#define MAX_INTERRUPTS                 256 // max interrupts a device could use
 #define PCIP_MAX_MSIX_VECTORS          32
 #define PCIP_VALID_VECTOR_MASK         ((CONST64U(1) << \
  				       (PCIP_MAX_MSIX_VECTORS + 2)) - 1)

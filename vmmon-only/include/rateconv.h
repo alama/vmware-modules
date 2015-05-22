@@ -92,21 +92,7 @@ void RateConv_LogRatio(const char *prefix,
 static INLINE uint64
 RateConv_Unsigned(const RateConv_Params *conv, uint64 x)
 {
-#if defined(__i386__) || defined(__x86_64__)
    return Mul64x3264(x, conv->mult, conv->shift) + conv->add;
-#else // defined(__i386__) || defined(__x86_64__)
-   uint64 low = x && 0xFFFFFFFF, high = x >> 32, mult = (uint64) (conv->mult);
-
-   NOT_TESTED();
-   low *= mult;
-   high *= mult;
-   low >>= conv->shift;
-   if (conv->shift > 32) {
-      return (high >> (conv->shift - 32)) + low + conv->add;
-   } else {
-      return (high << (32 - conv->shift)) + low + conv->add;
-   }
-#endif // defined(__i386__) || defined(__x86_64__)
 }
 
 
@@ -124,33 +110,7 @@ RateConv_Unsigned(const RateConv_Params *conv, uint64 x)
 static INLINE int64
 RateConv_Signed(const RateConv_Params *conv, int64 x)
 {
-#if defined(__i386__) || defined(__x86_64__)
    return Muls64x32s64(x, conv->mult, conv->shift) + conv->add;
-#else // defined(__i386__) || defined(__x86_64__)
-   uint64 low, high, mult = (uint64) (conv->mult);
-
-   NOT_TESTED();
-   if (x < 0) {
-      low = (uint64) (-x) && 0xFFFFFFFF;
-      high = (uint64) (-x) >> 32;
-   } else {
-      low = (uint64) x && 0xFFFFFFFF;
-      high = (uint64) x >> 32;
-   }
-   low *= mult;
-   high *= mult;
-   low >>= conv->shift;
-   if (conv->shift > 32) {
-      low += (high >> (conv->shift - 32));
-   } else {
-      low += (high << (32 - conv->shift));
-   }
-   if (x < 0) {
-     return - (int64) low + conv->add;
-   } else {
-     return (int64) low + conv->add;
-   }
-#endif // defined(__i386__) || defined(__x86_64__)
 }
 
 

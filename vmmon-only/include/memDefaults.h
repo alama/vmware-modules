@@ -65,10 +65,26 @@ MemDefaults_CalcMaxLockedPages(unsigned hostPages)  // IN:
    reservedPages = MIN((hostPages / 4) + MBYTES_2_PAGES(512),
                        GBYTES_2_PAGES(4));
 #elif defined(_WIN32)
-   reservedPages = MAX(hostPages / 4, MEMDEFAULTS_MIN_HOST_PAGES);
+   {
+      unsigned int hostGig = PAGES_2_GBYTES(hostPages);
+
+      if (hostGig <= 4) {
+         reservedPages = hostPages / 4;
+      } else if (hostGig >= 16) {
+         reservedPages = hostPages / 8;
+      } else {
+         /*
+          * Increment by 1/32 for each 4GB of host mem between 4 and 16.
+          * See PR779556.
+          */
+         reservedPages = hostPages / 32 * (8 - hostGig / 4);
+      }
+   }
 #else  // Linux
-   reservedPages = MAX(hostPages / 8, MEMDEFAULTS_MIN_HOST_PAGES);
+   reservedPages = hostPages / 8;
 #endif
+
+   reservedPages = MAX(reservedPages, MEMDEFAULTS_MIN_HOST_PAGES);
 
    return hostPages > reservedPages ? hostPages - reservedPages : 0;
 }

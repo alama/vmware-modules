@@ -39,7 +39,7 @@ struct MemTrack;
 
 typedef struct MemTrackEntry {
    VPN64                   vpn;
-   MPN                     mpn;
+   MPN64                   mpn;
    struct MemTrackEntry   *vpnChain;
 #if defined(MEMTRACK_MPN_LOOKUP)
    struct MemTrackEntry   *mpnChain;
@@ -51,10 +51,10 @@ typedef void (MemTrackCleanupCb)(void *cData, MemTrackEntry *entry);
 extern struct MemTrack *MemTrack_Init(void);
 extern unsigned MemTrack_Cleanup(struct MemTrack *mt, MemTrackCleanupCb *cb,
                                  void *cbData);
-extern MemTrackEntry *MemTrack_Add(struct MemTrack *mt, VPN64 vpn, MPN mpn);
+extern MemTrackEntry *MemTrack_Add(struct MemTrack *mt, VPN64 vpn, MPN64 mpn);
 extern MemTrackEntry *MemTrack_LookupVPN(struct MemTrack *mt, VPN64 vpn);
 #if defined(MEMTRACK_MPN_LOOKUP)
-extern MemTrackEntry *MemTrack_LookupMPN(struct MemTrack *mt, MPN mpn);
+extern MemTrackEntry *MemTrack_LookupMPN(struct MemTrack *mt, MPN64 mpn);
 #endif
 
 #endif // _MEMTRACK_H_

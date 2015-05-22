@@ -809,7 +809,7 @@ VMCIContext_Release(VMCIContext *context)  // IN
 {
    uint32 refCount;
    ASSERT(context);
-   refCount = Atomic_FetchAndDec(&context->refCount);
+   refCount = Atomic_ReadDec32(&context->refCount);
    if (refCount == 1) {
       VMCIContextFreeContext(context);
    }
@@ -1977,8 +1977,7 @@ VMCIContext_NotifyDoorbell(VMCIId srcCID,                   // IN
    if (srcCID != handle.context) {
       VMCIPrivilegeFlags dstPrivFlags;
 
-      if (!vmkernel && VMCI_CONTEXT_IS_VM(srcCID) &&
-          VMCI_CONTEXT_IS_VM(handle.context)) {
+      if (VMCI_CONTEXT_IS_VM(srcCID) && VMCI_CONTEXT_IS_VM(handle.context)) {
          VMCI_DEBUG_LOG(4, (LGPFX"Doorbell notification from VM to VM not "
                             "supported (src=0x%x, dst=0x%x).\n",
                             srcCID, handle.context));

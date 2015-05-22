@@ -1,5 +1,5 @@
 /*********************************************************
- * Copyright (C) 2010 VMware, Inc. All rights reserved.
+ * Copyright (C) 2010-2013 VMware, Inc. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License as published by the
@@ -52,6 +52,10 @@ typedef uint32 MonitorIdemAction;
 typedef struct MonitorActionSet {
    volatile uint64 word[ACTION_NUM_WORDS];
 } MonitorActionSet;
+
+#ifndef __cplusplus
+typedef enum MonitorActionSetName MonitorActionSetName;
+#endif
 
 /*
  * Summary of action and interrupt states.

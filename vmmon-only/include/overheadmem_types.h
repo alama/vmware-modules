@@ -1,5 +1,5 @@
 /*********************************************************
- * Copyright (C) 2001-2012 VMware, Inc. All rights reserved.
+ * Copyright (C) 2001-2013 VMware, Inc. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License as published by the
@@ -100,6 +100,7 @@ typedef struct OvhdMem_Overheads {
    uint32 paged;
    uint32 nonpaged;
    uint32 anonymous;
+   uint32 text;
 } OvhdMem_Overheads;
 
 typedef struct OvhdMem_Deltas {
@@ -126,26 +127,5 @@ typedef struct OvhdMemNode {
    char name[OVHDMEM_MAX_NAME_LEN];  // name of overhead source
    OvhdMemType type;                 // how/where memory for source is managed
 } OvhdMemNode;
-
-
-/*
- * An overheadmem configuration comprises not only the (primary) parameters
- * contributing to the overhead limits, but also those limits as well.
- */
-
-typedef struct OvhdMemConfig {
-   unsigned numVcpus;
-   uint32   memSize;
-   uint32   svgaFBSize;
-   uint32   mks3dSize;
-   uint32   pciPassthruSize;
-   uint32   numPvscsiAdapters;
-   uint32   numLsiAdapters;
-   uint32   numVmxnetAdapters;
-   uint32   numE1000Adapters;
-   uint32   numVmxnet3Adapters;
-   uint32   numPassthruDevices;
-   uint32   numAhciAdapters;
-} OvhdMemConfig;
 
 #endif

@@ -25,8 +25,8 @@
 #ifndef _HOSTIF_PRIV_H_
 #define _HOSTIF_PRIV_H_
 
-#if defined(VMX86_DEVEL) && defined(VM_X86_64)
-EXTERN int    HostIF_LookupLargeMPN(VA64 uAddr, MPN *mpn);
+#if defined(VMX86_DEVEL)
+EXTERN int    HostIF_LookupLargeMPN(VA64 uAddr, MPN64 *mpn);
 #endif
 
 /* Functions for transferring data to/from userspace. */

@@ -1,5 +1,5 @@
 /*********************************************************
- * Copyright (C) 1998 VMware, Inc. All rights reserved.
+ * Copyright (C) 1998-2013 VMware, Inc. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License as published by the
@@ -84,14 +84,12 @@ typedef struct VNet_Bind {
 #if defined __linux__
 #define VNET_BRFLAG_FORCE_SMAC    0x00000001
 
-typedef
-#include "vmware_pack_begin.h"
-struct VNet_BridgeParams {
+#pragma pack(push, 1)
+typedef struct VNet_BridgeParams {
    char   name[32];
    uint32 flags;
-}
-#include "vmware_pack_end.h"
-VNet_BridgeParams;
+} VNet_BridgeParams;
+#pragma pack(pop)
 
 #define SIOCSPEER3         _IOW(0x99, 0xE4, VNet_BridgeParams)
 #endif
@@ -132,14 +130,12 @@ typedef struct VNet_NetIf {
    uint8 instance;              // The "unit number" of the interface
 } VNet_NetIf;
 
-typedef
-#include "vmware_pack_begin.h"
-struct {
+#pragma pack(push, 1)
+typedef struct {
    char name[16]; // IN: BSD name of the interface to bridge.
    int media;     // IN: Media of the interface to bridge.
-}
-#include "vmware_pack_end.h"
-VNet_Bridge;
+} VNet_Bridge;
+#pragma pack(pop)
 
 #ifdef LATER
 typedef struct VNet_Read {
@@ -176,9 +172,8 @@ typedef struct VNet_SetMacAddrIOCTL {
    unsigned        flags;
 } VNet_SetMacAddrIOCTL;
 
-typedef
-#include "vmware_pack_begin.h"
-struct VNet_Notify {
+#pragma pack(push, 1)
+typedef struct VNet_Notify {
    uint32            version;
    uint32            actionVersion;  /* Version of monitor action logic */
    VA64              actPtr;         /* User VA of a MonitorActionIntr */
@@ -186,9 +181,8 @@ struct VNet_Notify {
    VA64              recvClusterPtr; /* User VA of a uint32 */
    MonitorIdemAction actionID;
    uint32            pollMask;
-}
-#include "vmware_pack_end.h"
-VNet_Notify;
+} VNet_Notify;
+#pragma pack(pop)
 
 #define VNET_SETMACADDRF_UNIQUE      0x01
 /*
@@ -225,15 +219,13 @@ struct VNetSwitchMap {
 #define VNET_MAX_EXACT_FILTER_LEN 32
 
 /* multicast filter in Vmnet layer */
-typedef
-#include "vmware_pack_begin.h"
-struct VNetMcastFilter {
+#pragma pack(push, 1)
+typedef struct VNetMcastFilter {
    uint32 exactFilterLen;
    uint32 ladrf[2];
    uint8  exactFilter[VNET_MAX_EXACT_FILTER_LEN][6];
-}
-#include "vmware_pack_end.h"
-VNetMcastFilter;
+} VNetMcastFilter;
+#pragma pack(pop)
 
 /*
  *----------------------------------------------------------------------------
@@ -251,43 +243,37 @@ VNetMcastFilter;
 #define VNET_EVENT_TYPE_LINK_STATE 0
 
 /* parameter for SIOCSUSERLISTENER */
-typedef
-#include "vmware_pack_begin.h"
-struct VNet_SetUserListener {
+#pragma pack(push, 1)
+typedef struct VNet_SetUserListener {
    uint32 version;
    uint32 classMask;
-}
-#include "vmware_pack_end.h"
-VNet_SetUserListener;
+} VNet_SetUserListener;
+#pragma pack(pop)
 
 /* the event header */
-typedef
-#include "vmware_pack_begin.h"
-struct VNet_EventHeader {
+#pragma pack(push, 1)
+typedef struct VNet_EventHeader {
    uint32 size;
    uint32 senderId;
    uint32 eventId;
    uint32 classSet;
    uint32 type;
-}
-#include "vmware_pack_end.h"
-VNet_EventHeader;
+} VNet_EventHeader;
+#pragma pack(pop)
 
 /*
  * the link state event
  * header = { sizeof(VNet_LinkStateEvent), ?, ?, VNET_EVENT_CLASS_BRIDGE,
  *            VNET_EVENT_TYPE_LINK_STATE }
  */
-typedef
-#include "vmware_pack_begin.h"
-struct VNet_LinkStateEvent {
+#pragma pack(push, 1)
+typedef struct VNet_LinkStateEvent {
    VNet_EventHeader header;
    uint32 adapter;
    Bool up;
    char _pad[3];
-}
-#include "vmware_pack_end.h"
-VNet_LinkStateEvent;
+} VNet_LinkStateEvent;
+#pragma pack(pop)
 
 /*
  *----------------------------------------------------------------------------

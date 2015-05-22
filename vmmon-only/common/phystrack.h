@@ -31,11 +31,7 @@
 
 #if defined(WINNT_DDK)
 /* XXX: can be more efficient based on server vs. desktop and version of Windows */
-#if defined(VM_X86_64)
 #define PHYSTRACK_MAX_SUPPORTED_GB (2048 + 4) /* 2 TB 64-bit W2k8 + 4 GB PCI */
-#else
-#define PHYSTRACK_MAX_SUPPORTED_GB (128 + 4)  /* 128 GB hosts, max for 32-bit Windows */
-#endif
 #endif
 
 struct PhysTracker;
@@ -44,10 +40,10 @@ struct VMDriver;
 EXTERN struct PhysTracker *PhysTrack_Alloc(struct VMDriver *vm);
 EXTERN void PhysTrack_Free(struct PhysTracker *);
 
-EXTERN void PhysTrack_Add(struct PhysTracker *, MPN );
-EXTERN void PhysTrack_Remove(struct PhysTracker *, MPN );
-EXTERN Bool PhysTrack_Test(const struct PhysTracker *, MPN );
-EXTERN MPN  PhysTrack_GetNext(const struct PhysTracker *, MPN );
+EXTERN void PhysTrack_Add(struct PhysTracker *, MPN64);
+EXTERN void PhysTrack_Remove(struct PhysTracker *, MPN64);
+EXTERN Bool PhysTrack_Test(const struct PhysTracker *, MPN64);
+EXTERN MPN64 PhysTrack_GetNext(const struct PhysTracker *, MPN64);
 
 #endif
 

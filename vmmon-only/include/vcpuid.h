@@ -1,5 +1,5 @@
 /*********************************************************
- * Copyright (C) 1998-2003 VMware, Inc. All rights reserved.
+ * Copyright (C) 1998-2013 VMware, Inc. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License as published by the
@@ -46,17 +46,19 @@ typedef uint32 Vcpuid;			// VCPU number
 #define BOOT_VCPU_ID     0
 #define IS_BOOT_VCPUID(vcpuid)  ((vcpuid) == BOOT_VCPU_ID)
 
-#define MAX_VCPUS	64
+#define MAX_VCPUS      128
+
+#define MAX_CORES_PER_SOCKET   64
 
 #ifdef VMM
 #include "vcpuset.h"
 
 /* In VMM, CurVcpuid() is available everywhere. */
-extern const Vcpuid  curVcpuid;
-extern const VCPUSet curVcpuidSet;
-#define CurVcpuid()             (curVcpuid)
-#define CurVcpuidSet()          (curVcpuidSet)
-#define IS_BOOT_VCPU()		IS_BOOT_VCPUID(CurVcpuid())
+extern const Vcpuid      curVcpuid;
+extern const VCPUSet     curVcpuidSet;
+#define CurVcpuid()         (curVcpuid)
+#define CurVcpuidSet()      (&curVcpuidSet)
+#define IS_BOOT_VCPU()      IS_BOOT_VCPUID(CurVcpuid())
 
 #endif  /* VMM */
 

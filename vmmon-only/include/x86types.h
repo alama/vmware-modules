@@ -1,5 +1,5 @@
 /*********************************************************
- * Copyright (C) 2003-2012 VMware, Inc. All rights reserved.
+ * Copyright (C) 2003-2014 VMware, Inc. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License as published by the
@@ -19,7 +19,7 @@
 /*
  * x86types.h --
  *
- *	Type definitions for the x86 architecture.
+ *      Type definitions for the x86 architecture.
  */
 
 #ifndef _X86TYPES_H_
@@ -33,7 +33,6 @@
 #define INCLUDE_ALLOW_DISTRIBUTE
 #define INCLUDE_ALLOW_VMCORE
 #define INCLUDE_ALLOW_VMMON
-#define INCLUDE_ALLOW_VMIROM
 #include "includeCheck.h"
 
 #include "vm_basic_types.h"
@@ -50,6 +49,7 @@
 #define VA_2_VPN(_va)  ((_va) >> PAGE_SHIFT)
 #define PTR_2_VPN(_ptr) VA_2_VPN((VA)(_ptr))
 #define VPN_2_VA(_vpn) ((_vpn) << PAGE_SHIFT)
+#define VPN_2_PTR(_vpn) ((void *)VPN_2_VA(_vpn))
 
 /*
  * Notice that we don't cast PA_2_PPN's argument to an unsigned type, because
@@ -58,13 +58,14 @@
  * high bits of your ppn.
  */
 
-#define PA_2_PPN(_pa)  ((_pa) >> PAGE_SHIFT)
+#define PA_2_PPN(_pa)     ((_pa) >> PAGE_SHIFT)
 #define PPN_2_PA(_ppn)    ((PA)(_ppn) << PAGE_SHIFT)
 
-static INLINE MA  MPN_2_MA(MPN mpn) { return (MA)mpn << PAGE_SHIFT; }
-static INLINE MPN MA_2_MPN(MA  ma)  { return (MPN)(ma >> PAGE_SHIFT); }
+static INLINE MA    MPN_2_MA(MPN64 mpn)   { return    (MA)mpn << PAGE_SHIFT;  }
+static INLINE MPN64 MA_2_MPN(MA ma)       { return (MPN64)(ma >> PAGE_SHIFT); }
 
-static INLINE MPN64 MA_2_MPN64(MA  ma)  { return (MPN64)(ma >> PAGE_SHIFT); }
+static INLINE IOA   IOPN_2_IOA(IOPN iopn) { return (IOA)(iopn << PAGE_SHIFT); }
+static INLINE IOPN  IOA_2_IOPN(IOA ioa)   { return (IOPN)(ioa >> PAGE_SHIFT); }
 
 /*
  * Types used for PL4 page table in x86_64
@@ -145,26 +146,22 @@ typedef uint16 Selector;
  *   tasks
  */
 
-typedef
-#include "vmware_pack_begin.h"
-#define IST_NUM_ENTRIES 8
 
-struct Task64 {
+#define IST_NUM_ENTRIES 8
+#pragma pack(push, 1)
+typedef struct Task64 {
    uint32     reserved0;
    uint64     rsp[3];   // Stacks for CPL 0-2.
    uint64     ist[IST_NUM_ENTRIES];   // ist[0] is reserved.
    uint64     reserved1;
    uint16     reserved2;
    uint16     IOMapBase;
-}
-#include "vmware_pack_end.h"
-Task64;
+} Task64;
+#pragma pack(pop)
 
 
-typedef
-#include "vmware_pack_begin.h"
-struct Task32 {
-
+#pragma pack(push, 1)
+typedef struct Task32 {
    uint32     prevTask;
    uint32     esp0;
    uint32     ss0;
@@ -192,13 +189,11 @@ struct Task32 {
    uint32     ldt;
    uint16     trap;
    uint16     IOMapBase;
-}
-#include "vmware_pack_end.h"
-Task32;
+} Task32;
+#pragma pack(pop)
 
-typedef
-#include "vmware_pack_begin.h"
-struct {
+#pragma pack(push, 1)
+typedef struct {
    uint16     prevTask;
    uint16     sp0;  // static.  Unmarked fields are dynamic
    uint16     ss0;  // static
@@ -221,9 +216,8 @@ struct {
    uint16     ss;
    uint16     ds;
    uint16     ldt;  // static
-}
-#include "vmware_pack_end.h"
-Task16;
+} Task16;
+#pragma pack(pop)
 
 // Task defaults to Task32 for everyone except vmkernel. Task64 is used where
 // needed by these products.
@@ -242,45 +236,37 @@ typedef Task32 Task;
  *   far pointers
  */
 
-typedef
-#include "vmware_pack_begin.h"
-struct {
+#pragma pack(push, 1)
+typedef struct {
 #if defined(VMM) || defined(COREQUERY)
    uint64 va;
 #else
    uint32 va;
 #endif
    Selector seg;
-}
-#include "vmware_pack_end.h"
-FarPtr;
+} FarPtr;
+#pragma pack(pop)
 
-typedef
-#include "vmware_pack_begin.h"
-struct FarPtr16 {
+#pragma pack(push, 1)
+typedef struct FarPtr16 {
    uint16   offset;
    uint16   selector;
-}
-#include "vmware_pack_end.h"
-FarPtr16;
+} FarPtr16;
+#pragma pack(pop)
 
-typedef
-#include "vmware_pack_begin.h"
-struct FarPtr32 {
+#pragma pack(push, 1)
+typedef struct FarPtr32 {
    uint32   offset;
    uint16   selector;
-}
-#include "vmware_pack_end.h"
-FarPtr32;
+} FarPtr32;
+#pragma pack(pop)
 
-typedef
-#include "vmware_pack_begin.h"
-struct FarPtr64 {
+#pragma pack(push, 1)
+typedef struct FarPtr64 {
    uint64   offset;
    uint16   selector;
-}
-#include "vmware_pack_end.h"
-FarPtr64;
+} FarPtr64;
+#pragma pack(pop)
 
 /*
  * X86-defined stack layouts for interrupts, exceptions, irets, calls, etc.
@@ -289,37 +275,32 @@ FarPtr64;
 /*
  * Layout of the 64-bit stack frame on exception.
  */
-typedef
-#include "vmware_pack_begin.h"
-struct x86ExcFrame64 {
+#pragma pack(push, 1)
+typedef struct x86ExcFrame64 {
    uint64       rip;
    uint16       cs, __sel[3];
    uint64       rflags;
    uint64       rsp;
    uint16       ss, __ssel[3];
-}
-#include "vmware_pack_end.h"
-x86ExcFrame64;
+} x86ExcFrame64;
+#pragma pack(pop)
 
-typedef
-#include "vmware_pack_begin.h"
-struct x86ExcFrame64WithErrorCode {
+#pragma pack(push, 1)
+typedef struct x86ExcFrame64WithErrorCode {
    uint32       errorCode, __errorCode;
    uint64       rip;
    uint16       cs, __sel[3];
    uint64       rflags;
    uint64       rsp;
    uint16       ss, __ssel[3];
-}
-#include "vmware_pack_end.h"
-x86ExcFrame64WithErrorCode;
+} x86ExcFrame64WithErrorCode;
+#pragma pack(pop)
 
 /*
  * Layout of the 32-bit stack frame on exception.
  */
-typedef
-#include "vmware_pack_begin.h"
-struct x86ExcFrame32 {
+#pragma pack(push, 1)
+typedef struct x86ExcFrame32 {
    uint32         eip;
    union {
       struct {
@@ -328,69 +309,60 @@ struct x86ExcFrame32 {
       uint32      cs32;
    } u;
    uint32         eflags;
-}
-#include "vmware_pack_end.h"
-x86ExcFrame32;
+} x86ExcFrame32;
+#pragma pack(pop)
 
 /*
  * Layout of the 32-bit stack frame with ss:esp and no error code.
  */
-typedef
-#include "vmware_pack_begin.h"
-struct x86ExcFrame32WithStack {
+#pragma pack(push, 1)
+typedef struct x86ExcFrame32WithStack {
    uint32      eip;
    uint16      cs, __csu;
    uint32      eflags;
    uint32      esp;
    uint16      ss, __ssu;
-}
-#include "vmware_pack_end.h"
-x86ExcFrame32WithStack;
+} x86ExcFrame32WithStack;
+#pragma pack(pop)
 
 /*
  * Layout of the 32-bit stack frame on inter-level transfer.
  */
-typedef
-#include "vmware_pack_begin.h"
-struct x86ExcFrame32IL {
+#pragma pack(push, 1)
+typedef struct x86ExcFrame32IL {
    uint32      errorCode;
    uint32      eip;
    uint16      cs, __csu;
    uint32      eflags;
    uint32      esp;
    uint16      ss, __ssu;
-}
-#include "vmware_pack_end.h"
-x86ExcFrame32IL;
+} x86ExcFrame32IL;
+#pragma pack(pop)
 
 
 /*
  * Layout of the 16-bit stack frame on exception.
  */
-typedef
-#include "vmware_pack_begin.h"
-struct x86ExcFrame16 {
+#pragma pack(push, 1)
+typedef struct x86ExcFrame16 {
    uint16   eip;
    uint16   cs;
    uint16   eflags;
-}
-#include "vmware_pack_end.h"
-x86ExcFrame16;
+} x86ExcFrame16;
+#pragma pack(pop)
 
 /*
  * Layout of the 16-bit stack frame which incudes ss:sp.
  */
-typedef
-#include "vmware_pack_begin.h"
-struct x86ExcFrame16WithStack {
+#pragma pack(push, 1)
+typedef struct x86ExcFrame16WithStack {
    uint16   ip;
    uint16   cs;
    uint16   flags;
    uint16   sp;
    uint16   ss;
-}
-#include "vmware_pack_end.h"
-x86ExcFrame16WithStack;
+} x86ExcFrame16WithStack;
+#pragma pack(pop)
 
 /*
  * Layout of the 32-bit stack frame on exception
@@ -399,9 +371,8 @@ x86ExcFrame16WithStack;
  * in turn is superset of intra-level exception
  * stack frame.
  */
-typedef
-#include "vmware_pack_begin.h"
-struct x86ExcFrameV8086 {
+#pragma pack(push, 1)
+typedef struct x86ExcFrameV8086 {
    uint32         eip;
    union {
       struct {
@@ -416,18 +387,16 @@ struct x86ExcFrameV8086 {
    uint16         ds, __ds;
    uint16         fs, __fs;
    uint16         gs, __gs;
-}
-#include "vmware_pack_end.h"
-x86ExcFrameV8086;
+} x86ExcFrameV8086;
+#pragma pack(pop)
 
 /*
  * Layout of the 32-bit stack frame on exception
  * from V8086 mode with errorCode. It is
  * superset of SegmentExcFrameV8086.
  */
-typedef
-#include "vmware_pack_begin.h"
-struct x86ExcFrameV8086WithErrorCode {
+#pragma pack(push, 1)
+typedef struct x86ExcFrameV8086WithErrorCode {
    uint32         errorCode;
    uint32         eip;
    union {
@@ -443,61 +412,52 @@ struct x86ExcFrameV8086WithErrorCode {
    uint16         ds, __ds;
    uint16         fs, __fs;
    uint16         gs, __gs;
-}
-#include "vmware_pack_end.h"
-x86ExcFrameV8086WithErrorCode;
+} x86ExcFrameV8086WithErrorCode;
+#pragma pack(pop)
 
 /*
  * Layout of the stack on a 32 bit far call.
  */
-typedef
-#include "vmware_pack_begin.h"
-struct x86CallStack32 {
+#pragma pack(push, 1)
+typedef struct x86CallStack32 {
    uint32   eip;
    uint16   cs, __cs;
-}
-#include "vmware_pack_end.h"
-x86CallStack32;
+} x86CallStack32;
+#pragma pack(pop)
 
 /*
  * Layout of the stack on a 16 bit far call.
  */
-typedef
-#include "vmware_pack_begin.h"
-struct x86CallStack16 {
+#pragma pack(push, 1)
+typedef struct x86CallStack16 {
    uint16   ip;
    uint16   cs;
-}
-#include "vmware_pack_end.h"
-x86CallStack16;
+} x86CallStack16;
+#pragma pack(pop)
 
 /*
  * Layout of the stack on a 32 bit far call.
  */
-typedef
-#include "vmware_pack_begin.h"
-struct x86CallGateStack32 {
+#pragma pack(push, 1)
+typedef struct x86CallGateStack32 {
    uint32   eip;
    uint16   cs, __cs;
    uint32   esp;
    uint16   ss, __ss;
-}
-#include "vmware_pack_end.h"
-x86CallGateStack32;
+} x86CallGateStack32;
+#pragma pack(pop)
 
 /*
  * Layout of the stack on a 16 bit far call.
  */
-typedef
-#include "vmware_pack_begin.h"
-struct x86CallGateStack16 {
+#pragma pack(push, 1)
+typedef struct x86CallGateStack16 {
    uint16   ip;
    uint16   cs;
    uint16   sp;
    uint16   ss;
-}
-#include "vmware_pack_end.h"
-x86CallGateStack16;
+} x86CallGateStack16;
+#pragma pack(pop)
 
 typedef struct DebugControlRegister {
 

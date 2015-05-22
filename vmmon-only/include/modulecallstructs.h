@@ -1,5 +1,5 @@
 /*********************************************************
- * Copyright (C) 2006-2011 VMware, Inc. All rights reserved.
+ * Copyright (C) 2006,2009-2011,2013-2014 VMware, Inc. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License as published by the
@@ -38,59 +38,63 @@
 #include "x86types.h"
 
 /*
- *      Flags indicating system call MSR status.
+ *      Flags indicating switched MSR status.
  *
- * PRESERVED - Monitor or user world value is preserved on world switch.
- * SHADOWED  - Live monitor value is always shadowed in the scs structure.
- * CLOBBERED - Host value is clobbered by monitor (hosted only).
+ * UNUSED    - Not used by the monitor (yet). [This is a value, not a flag.]
+ * USED      - Hardware MSR is used by the monitor.
+ * RESTORED  - Monitor value is restored on world switch into the VMM.
+ * SHADOWED  - Live monitor value is always shadowed in the SwitchedMSRState.
  *
  */
 
-#define SCMSR_FLAG_PRESERVED     1
-#define SCMSR_FLAG_SHADOWED      2
-#define SCMSR_FLAG_CLOBBERED     4
+#define SWITCHED_MSR_FLAG_UNUSED           0
+#define SWITCHED_MSR_FLAG_USED             1
+#define SWITCHED_MSR_FLAG_RESTORED         2
+#define SWITCHED_MSR_FLAG_SHADOWED         4
 
 /*
- *      Data structures for dealing with the system call MSRs that need
+ * Note: If you add an msr to this list, please also ensure that
+ *       hardware support for the msr is properly indicated in
+ *       both the monitor (MonMSRIsSupported) and in the vmkernel
+ *       (world switch msrSupported array).
+ */
+#define SWITCHED_MSRS       \
+   SWMSR(MSR_SYSENTER_CS)   \
+   SWMSR(MSR_SYSENTER_EIP)  \
+   SWMSR(MSR_SYSENTER_ESP)  \
+   SWMSR(MSR_STAR)          \
+   SWMSR(MSR_LSTAR)         \
+   SWMSR(MSR_CSTAR)         \
+   SWMSR(MSR_SFMASK)        \
+   SWMSR(MSR_TSC_AUX)       \
+   SWMSR(MSR_BD_TSC_RATIO)
+
+/*
+ *      Data structures for dealing with the context-switched MSRs that need
  *      to be specially handled.  While the MSR definitions themselves
  *      are part of the x86 architecture, our handling of them (and hence
- *      these data structures) are an implementation detail.
+ *      these data structures) is an implementation detail.
  */
 
-typedef enum SystemCallMSR {
-   SCMSR_SYSENTERCS,
-   SCMSR_SYSENTERRIP,
-   SCMSR_SYSENTERRSP,
-   SCMSR_STAR,
-   SCMSR_LSTAR,
-   SCMSR_CSTAR,
-   SCMSR_SFMASK,
-   NUM_SCMSR_REGS
-} SystemCallMSR;
 
-typedef struct SystemCallRegistersStruct {
-   /* The order here must match up with the enum above. */
-   Selector     sysenterCS;
-   uint16       _pad[3];
-   uint64       sysenterRIP;
-   uint64       sysenterRSP;
-   uint64       star;
-   uint64       lstar;
-   uint64       cstar;
-   uint64       sfmask;
-} SystemCallRegistersStruct;
+typedef enum SwitchedMSR {
+#define SWMSR(msr) SWITCHED_##msr,
+   SWITCHED_MSRS
+#undef SWMSR
+   NUM_SWITCHED_MSRS
+} SwitchedMSR;
 
 /*
- * System Call Information for each VCPU.
+ * Switched MSR values for each [vp]CPU.
  */
-typedef union SystemCallRegisters {
-   SystemCallRegistersStruct s;
-   uint64 a[NUM_SCMSR_REGS];
-} SystemCallRegisters;
+typedef struct SwitchedMSRValues {
+   uint64 a[NUM_SWITCHED_MSRS];
+} SwitchedMSRValues;
 
-typedef struct SystemCallState {
-   SystemCallRegisters scr;
-   uint8               msrFlags[NUM_SCMSR_REGS];
-} SystemCallState;
+typedef struct SwitchedMSRState {
+   SwitchedMSRValues smv;
+   uint8             flags[NUM_SWITCHED_MSRS];
+   uint32            _pad;
+} SwitchedMSRState;
 
 #endif

@@ -1,5 +1,5 @@
 /*********************************************************
- * Copyright (C) 2005-2011 VMware, Inc. All rights reserved.
+ * Copyright (C) 2005-2013 VMware, Inc. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License as published by the
@@ -128,6 +128,7 @@
 #define SVM_VMCB_APIC_VINTR_PRIO_SHIFT     16
 #define SVM_VMCB_APIC_VIGN_TPR             0x0000000000100000ULL
 #define SVM_VMCB_APIC_VINTR_MASKING        0x0000000001000000ULL
+#define SVM_VMCB_APIC_AVIC_ENABLE          0x0000000080000000ULL
 #define SVM_VMCB_APIC_VINTR_VECTOR_MASK    0x000000ff00000000ULL
 #define SVM_VMCB_APIC_VINTR_VECTOR_SHIFT   32
 
@@ -152,7 +153,8 @@
 #define SVM_VMCB_CLEAN_SEG            8
 #define SVM_VMCB_CLEAN_CR2            9
 #define SVM_VMCB_CLEAN_LBR            10
-#define SVM_VMCB_CLEAN_MASK           ((1 << 11) - 1)
+#define SVM_VMCB_CLEAN_AVIC           11
+#define SVM_VMCB_CLEAN_MASK           ((1 << 12) - 1)
 
 /* Segment attribute masks (used for conversion to unpacked format) */
 #define SVM_VMCB_ATTRIB_LOW           0x000000ff
@@ -182,59 +184,61 @@
 #define SVM_VMCB_AR_GRAN_SHIFT      (AR_GRAN_SHIFT     - 4)
 
 /* Unique Exit Codes */
-#define SVM_EXITCODE_CR_READ(n)       (0 + (n))
-#define SVM_EXITCODE_CR_WRITE(n)     (16 + (n))
-#define SVM_EXITCODE_DR_READ(n)      (32 + (n))
-#define SVM_EXITCODE_DR_WRITE(n)     (48 + (n))
-#define SVM_EXITCODE_XCP(n)          (64 + (n))
-#define SVM_EXITCODE_INTR            96
-#define SVM_EXITCODE_NMI             97
-#define SVM_EXITCODE_SMI             98
-#define SVM_EXITCODE_INIT            99
-#define SVM_EXITCODE_VINTR          100
-#define SVM_EXITCODE_CR0_SEL_WR     101
-#define SVM_EXITCODE_SIDT           102
-#define SVM_EXITCODE_SGDT           103
-#define SVM_EXITCODE_SLDT           104
-#define SVM_EXITCODE_STR            105
-#define SVM_EXITCODE_LIDT           106
-#define SVM_EXITCODE_LGDT           107
-#define SVM_EXITCODE_LLDT           108
-#define SVM_EXITCODE_LTR            109
-#define SVM_EXITCODE_RDTSC          110
-#define SVM_EXITCODE_RDPMC          111
-#define SVM_EXITCODE_PUSHF          112
-#define SVM_EXITCODE_POPF           113
-#define SVM_EXITCODE_CPUID          114
-#define SVM_EXITCODE_RSM            115
-#define SVM_EXITCODE_IRET           116
-#define SVM_EXITCODE_SWINT          117
-#define SVM_EXITCODE_INVD           118
-#define SVM_EXITCODE_PAUSE          119
-#define SVM_EXITCODE_HLT            120
-#define SVM_EXITCODE_INVLPG         121
-#define SVM_EXITCODE_INVLPGA        122
-#define SVM_EXITCODE_IOIO           123
-#define SVM_EXITCODE_MSR            124
-#define SVM_EXITCODE_TS             125
-#define SVM_EXITCODE_FERR_FRZ       126
-#define SVM_EXITCODE_SHUTDOWN       127
-#define SVM_EXITCODE_VMRUN          128
-#define SVM_EXITCODE_VMMCALL        129
-#define SVM_EXITCODE_VMLOAD         130
-#define SVM_EXITCODE_VMSAVE         131
-#define SVM_EXITCODE_STGI           132
-#define SVM_EXITCODE_CLGI           133
-#define SVM_EXITCODE_SKINIT         134
-#define SVM_EXITCODE_RDTSCP         135
-#define SVM_EXITCODE_ICEBP          136
-#define SVM_EXITCODE_WBINVD         137
-#define SVM_EXITCODE_MONITOR        138
-#define SVM_EXITCODE_MWAIT          139
-#define SVM_EXITCODE_MWAIT_COND     140
-#define SVM_EXITCODE_XSETBV         141
-#define SVM_EXITCODE_NPF           1024
-#define SVM_EXITCODE_INVALID        (-1ULL)
+#define SVM_EXITCODE_CR_READ(n)             (0 + (n))
+#define SVM_EXITCODE_CR_WRITE(n)           (16 + (n))
+#define SVM_EXITCODE_DR_READ(n)            (32 + (n))
+#define SVM_EXITCODE_DR_WRITE(n)           (48 + (n))
+#define SVM_EXITCODE_XCP(n)                (64 + (n))
+#define SVM_EXITCODE_INTR                  96
+#define SVM_EXITCODE_NMI                   97
+#define SVM_EXITCODE_SMI                   98
+#define SVM_EXITCODE_INIT                  99
+#define SVM_EXITCODE_VINTR                100
+#define SVM_EXITCODE_CR0_SEL_WR           101
+#define SVM_EXITCODE_SIDT                 102
+#define SVM_EXITCODE_SGDT                 103
+#define SVM_EXITCODE_SLDT                 104
+#define SVM_EXITCODE_STR                  105
+#define SVM_EXITCODE_LIDT                 106
+#define SVM_EXITCODE_LGDT                 107
+#define SVM_EXITCODE_LLDT                 108
+#define SVM_EXITCODE_LTR                  109
+#define SVM_EXITCODE_RDTSC                110
+#define SVM_EXITCODE_RDPMC                111
+#define SVM_EXITCODE_PUSHF                112
+#define SVM_EXITCODE_POPF                 113
+#define SVM_EXITCODE_CPUID                114
+#define SVM_EXITCODE_RSM                  115
+#define SVM_EXITCODE_IRET                 116
+#define SVM_EXITCODE_SWINT                117
+#define SVM_EXITCODE_INVD                 118
+#define SVM_EXITCODE_PAUSE                119
+#define SVM_EXITCODE_HLT                  120
+#define SVM_EXITCODE_INVLPG               121
+#define SVM_EXITCODE_INVLPGA              122
+#define SVM_EXITCODE_IOIO                 123
+#define SVM_EXITCODE_MSR                  124
+#define SVM_EXITCODE_TS                   125
+#define SVM_EXITCODE_FERR_FRZ             126
+#define SVM_EXITCODE_SHUTDOWN             127
+#define SVM_EXITCODE_VMRUN                128
+#define SVM_EXITCODE_VMMCALL              129
+#define SVM_EXITCODE_VMLOAD               130
+#define SVM_EXITCODE_VMSAVE               131
+#define SVM_EXITCODE_STGI                 132
+#define SVM_EXITCODE_CLGI                 133
+#define SVM_EXITCODE_SKINIT               134
+#define SVM_EXITCODE_RDTSCP               135
+#define SVM_EXITCODE_ICEBP                136
+#define SVM_EXITCODE_WBINVD               137
+#define SVM_EXITCODE_MONITOR              138
+#define SVM_EXITCODE_MWAIT                139
+#define SVM_EXITCODE_MWAIT_COND           140
+#define SVM_EXITCODE_XSETBV               141
+#define SVM_EXITCODE_NPF                 1024
+#define SVM_EXITCODE_AVIC_INCOMPLETE_IPI 1025
+#define SVM_EXITCODE_AVIC_NOACCEL        1026
+#define SVM_EXITCODE_INVALID             (-1ULL)
 
 /* ExitInfo1 for I/O exits */
 #define SVM_IOEXIT_IN            0x00000001
@@ -313,14 +317,12 @@
                      SVM_VMCB_EXEC_CTL_##name);
 
 /* Header for a secure loader block with no SL header */
-typedef
-#include "vmware_pack_begin.h"
-struct {
+#pragma pack(push, 1)
+typedef struct {
    uint16 entryOffs;
    uint16 codeLen;
-}
-#include "vmware_pack_end.h"
-SLB_Header;
+} SLB_Header;
+#pragma pack(pop)
 
 static INLINE uint64
 SVM_ExecCtlBit(uint32 exitCode)

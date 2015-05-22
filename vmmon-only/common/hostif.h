@@ -1,5 +1,5 @@
 /*********************************************************
- * Copyright (C) 1998 VMware, Inc. All rights reserved.
+ * Copyright (C) 1998-2014 VMware, Inc. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License as published by the
@@ -67,7 +67,7 @@ typedef enum {
 } HostIFIPIMode;
 
 EXTERN int   HostIF_Init(VMDriver *vm);
-EXTERN int   HostIF_LookupUserMPN(VMDriver *vm, VA64 uAddr, MPN *mpn);
+EXTERN int   HostIF_LookupUserMPN(VMDriver *vm, VA64 uAddr, MPN64 *mpn);
 EXTERN void *HostIF_MapCrossPage(VMDriver *vm, VA64 uAddr);
 EXTERN void  HostIF_InitFP(VMDriver *vm);
 
@@ -75,20 +75,19 @@ EXTERN void *HostIF_AllocPage(void);
 EXTERN void  HostIF_FreePage(void *ptr);
 
 EXTERN int   HostIF_LockPage(VMDriver *vm, VA64 uAddr,
-                             Bool allowMultipleMPNsPerVA, MPN *mpn);
+                             Bool allowMultipleMPNsPerVA, MPN64 *mpn);
 EXTERN int   HostIF_UnlockPage(VMDriver *vm, VA64 uAddr);
-EXTERN int   HostIF_UnlockPageByMPN(VMDriver *vm, MPN mpn, VA64 uAddr);
-EXTERN Bool  HostIF_IsLockedByMPN(VMDriver *vm, MPN mpn);
+EXTERN int   HostIF_UnlockPageByMPN(VMDriver *vm, MPN64 mpn, VA64 uAddr);
+EXTERN Bool  HostIF_IsLockedByMPN(VMDriver *vm, MPN64 mpn);
 EXTERN void  HostIF_FreeAllResources(VMDriver *vm);
 EXTERN uint64 HostIF_ReadUptime(void);
 EXTERN uint64 HostIF_UptimeFrequency(void);
-EXTERN unsigned int HostIF_EstimateLockedPageLimit(const VMDriver *vm, 
- 						   unsigned int lockedPages);
+EXTERN unsigned int HostIF_EstimateLockedPageLimit(const VMDriver *vm,
+                                                   unsigned int lockedPages);
 EXTERN void  HostIF_Wait(unsigned int timeoutMs);
 EXTERN void  HostIF_WaitForFreePages(unsigned int timeoutMs);
-EXTERN Bool  HostIF_IsAnonPage(VMDriver *vm, MPN mpn);
-EXTERN void *HostIF_AllocCrossGDT(uint32 numPages, MPN maxValidFirst,
-                                  MPN *crossGDTMPNs);
+EXTERN void *HostIF_AllocCrossGDT(uint32 numPages, MPN64 maxValidFirst,
+                                  MPN64 *crossGDTMPNs);
 EXTERN void  HostIF_FreeCrossGDT(uint32 numPages, void *crossGDT);
 EXTERN void  HostIF_VMLock(VMDriver *vm, int callerID);
 EXTERN void  HostIF_VMUnlock(VMDriver *vm, int callerID);
@@ -100,12 +99,12 @@ EXTERN Bool  HostIF_APICInit(VMDriver *vm, Bool setVMPtr, Bool probe);
 
 EXTERN int   HostIF_SemaphoreWait(VMDriver *vm,
                                   Vcpuid vcpuid,
-                                  uint32 *args);
+                                  uint64 *args);
 
-EXTERN int   HostIF_SemaphoreSignal(uint32 *args);
+EXTERN int   HostIF_SemaphoreSignal(uint64 *args);
 
-EXTERN void  HostIF_SemaphoreForceWakeup(VMDriver *vm, Vcpuid vcpuid);
-EXTERN HostIFIPIMode HostIF_IPI(VMDriver *vm, VCPUSet vcs, Bool all);
+EXTERN void  HostIF_SemaphoreForceWakeup(VMDriver *vm, const VCPUSet *vcs);
+EXTERN HostIFIPIMode HostIF_IPI(VMDriver *vm, const VCPUSet *vcs, Bool all);
 
 EXTERN uint32 HostIF_GetCurrentPCPU(void);
 EXTERN void HostIF_CallOnEachCPU(void (*func)(void *), void *data);
@@ -119,15 +118,15 @@ EXTERN int HostIF_AllocLockedPages(VMDriver *vm, VA64 addr,
                                    unsigned int numPages, Bool kernelMPNBuffer);
 EXTERN int HostIF_FreeLockedPages(VMDriver *vm, VA64 addr,
                                   unsigned int numPages, Bool kernelMPNBuffer);
-EXTERN MPN HostIF_GetNextAnonPage(VMDriver *vm, MPN mpn);
+EXTERN MPN64 HostIF_GetNextAnonPage(VMDriver *vm, MPN64 mpn);
 EXTERN int HostIF_GetLockedPageList(VMDriver *vm, VA64 uAddr,
                                     unsigned int numPages);
 
-EXTERN int HostIF_ReadPage(MPN mpn, VA64 addr, Bool kernelBuffer);
-EXTERN int HostIF_WritePage(MPN mpn, VA64 addr, Bool kernelBuffer);
+EXTERN int HostIF_ReadPage(MPN64 mpn, VA64 addr, Bool kernelBuffer);
+EXTERN int HostIF_WritePage(MPN64 mpn, VA64 addr, Bool kernelBuffer);
 #ifdef _WIN32
 /* Add a HostIF_ReadMachinePage() if/when needed */
-EXTERN int HostIF_WriteMachinePage(MPN mpn, VA64 addr);
+EXTERN int HostIF_WriteMachinePage(MPN64 mpn, VA64 addr);
 #else
 #define HostIF_WriteMachinePage(_a, _b) HostIF_WritePage((_a), (_b), TRUE)
 #endif
@@ -141,8 +140,8 @@ EXTERN void HostIF_FastClockUnlock(int callerID);
 #endif
 EXTERN int HostIF_SetFastClockRate(unsigned rate);
 
-EXTERN MPN HostIF_AllocMachinePage(void);
-EXTERN void HostIF_FreeMachinePage(MPN mpn);
+EXTERN MPN64 HostIF_AllocMachinePage(void);
+EXTERN void HostIF_FreeMachinePage(MPN64 mpn);
 
 EXTERN int HostIF_SafeRDMSR(uint32 msr, uint64 *val);
 
