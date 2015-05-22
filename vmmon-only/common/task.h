@@ -1,5 +1,5 @@
 /*********************************************************
- * Copyright (C) 1998 VMware, Inc. All rights reserved.
+ * Copyright (C) 1998-2013 VMware, Inc. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License as published by the
@@ -34,8 +34,7 @@ extern int Task_InitCrossGDT(struct InitCrossGDT *initCrossGDT);
 extern void Task_Switch(VMDriver *vm, Vcpuid vcpuid);
 extern Bool Task_Initialize(void);
 extern void Task_Terminate(void);
-extern MPN Task_GetDummyVMCS(int vmcsId);
-extern MPN Task_GetRootVMCS(uint32 pCPU);
+extern MPN64 Task_GetHVRootPageForPCPU(uint32 pCPU);
 extern Descriptor *Task_GetTmpGDT(uint32 pCPU);
 
 #endif

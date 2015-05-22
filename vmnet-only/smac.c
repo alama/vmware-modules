@@ -3105,12 +3105,13 @@ ProcessOutgoingIPv4Packet(SMACPacket *packet,  // IN: cloned packet to process
 	              "DHCP packet destined for a server\n"));
 
 	 /*
-	  * Should this really be 300, or something smaller (like the maximum
-	  * length that we'll actually index into the DHCP data)?
+	  * The minimum length of a DHCP packet must be 243 bytes:-
+	  * 240 (DHCP header including magic cookie) + 3 (message type option)
+	  * RFC 2131 mandates having the 'message type' option in every DHCP packet.
 	  */
 
-	 if (GetPacketLength(packet) < ethHeaderLen + ipHeaderLen + 
-               UDP_HEADER_LEN + 300) {
+	 if (GetPacketLength(packet) < ethHeaderLen + ipHeaderLen +
+               UDP_HEADER_LEN + 243) {
 	    VNETKdPrint((MODULE_NAME "ProcessOutgoing: packet "
 	                 "too small for DHCP\n"));
 	    return;

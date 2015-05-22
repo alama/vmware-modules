@@ -1,5 +1,5 @@
 /*********************************************************
- * Copyright (C) 1998-2011 VMware, Inc. All rights reserved.
+ * Copyright (C) 1998-2012 VMware, Inc. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License as published by the
@@ -167,7 +167,7 @@
 #define PERFCTR_AMD_RET_NEAR_RETURNS                           0xc8
 #define PERFCTR_AMD_RET_NEAR_RETURNS_MISPRED                   0xc9
 #define PERFCTR_AMD_RET_INDIRECT_BRANCHES_MISPRED              0xca
-#define PERFCTR_AMD_RET_FASTPATH_DOUBLE_OP_INSTR               0xcc
+#define PERFCTR_AMD_RET_MMX_FP_INSTR                           0xcb
 #define PERFCTR_AMD_INT_MASKED_CYCLES                          0xcd
 #define PERFCTR_AMD_INT_MASKED_CYCLES_WITH_INT_PEND            0xce
 
@@ -191,15 +191,15 @@
 
 /* AMD Memory Controller Events */
 
-#define PERFCTR_AMD_MEM_CTRL_PAGE_TABLE_OVERFLOWS    		    0xe1
+#define PERFCTR_AMD_MEM_CTRL_PAGE_TABLE_OVERFLOWS                   0xe1
 #define PERFCTR_AMD_CPU_IO_REQUESTS_TO_MEMORY_IO                    0xe9
 #define PERFCTR_AMD_PROBE_RESPONSE_AND_UPSTREAM_REQ                 0xec 
  
 /* AMD HyperTransport Interface Events */
 
-#define PERFCTR_AMD_HT_L0_TX_BW 				    0xf6 
-#define PERFCTR_AMD_HT_L1_TX_BW 				    0xf7 
-#define PERFCTR_AMD_HT_L2_TX_BW 				    0xf8
+#define PERFCTR_AMD_HT_L0_TX_BW                                     0xf6
+#define PERFCTR_AMD_HT_L1_TX_BW                                     0xf7
+#define PERFCTR_AMD_HT_L2_TX_BW                                     0xf8
 
 /*
  * ----------------------------------------------------------------------
@@ -381,7 +381,7 @@
 /*
  * P6 Performance Counter MSR Addresses
  */
-#define PERFCTR_P6_PERFEVTSEL0_ADDR          	 0x00000186
+#define PERFCTR_P6_PERFEVTSEL0_ADDR              0x00000186
 #define PERFCTR_P6_PERFCTR0_ADDR                 0x000000c1
 
 /*
@@ -421,18 +421,22 @@
 #define PERFCTR_CORE_APIC_INTR                   PERFCTR_CPU_APIC_INTR
 #define PERFCTR_CORE_ENABLE                      PERFCTR_CPU_ENABLE
 #define PERFCTR_CORE_ANYTHREAD                   0x00200000
+#define PERFCTR_CORE_IN_TX                       (CONST64U(1) << 32)
+#define PERFCTR_CORE_IN_TXCP                     (CONST64U(1) << 33)
 #define PERFCTR_CORE_SHIFT_BY_UNITMASK(e)        ((e) << 8)
 #define PERFCTR_CORE_FIXED_CTR0_PMC              0x40000000
 #define PERFCTR_CORE_FIXED_CTR1_PMC              0x40000001
-#define PERFCTR_CORE_FIXED_PMI_MASKn(n)          (0x8U << ((n) * 4))
-#define PERFCTR_CORE_FIXED_ANY_MASKn(n)          (0x4U << ((n) * 4))
-#define PERFCTR_CORE_FIXED_KERNEL_MASKn(n)       (0x1U << ((n) * 4))
-#define PERFCTR_CORE_FIXED_USER_MASKn(n)         (0x2U << ((n) * 4))
-#define PERFCTR_CORE_FIXED_ENABLE_MASKn(n)       (0x3U << ((n) * 4))
-#define PERFCTR_CORE_FIXED_MASKn(n)              (0xfU << ((n) * 4))
+#define PERFCTR_CORE_FIXED_PMI_MASKn(n)          (CONST64U(0x8) << ((n) * 4))
+#define PERFCTR_CORE_FIXED_ANY_MASKn(n)          (CONST64U(0x4) << ((n) * 4))
+#define PERFCTR_CORE_FIXED_KERNEL_MASKn(n)       (CONST64U(0x1) << ((n) * 4))
+#define PERFCTR_CORE_FIXED_USER_MASKn(n)         (CONST64U(0x2) << ((n) * 4))
+#define PERFCTR_CORE_FIXED_ENABLE_MASKn(n)       (CONST64U(0x3) << ((n) * 4))
+#define PERFCTR_CORE_FIXED_MASKn(n)              (CONST64U(0xf) << ((n) * 4))
 #define PERFCTR_CORE_FIXED_SHIFTBYn(n)           ((n) * 4)
-#define PERFCTR_CORE_FIXED_ANYTHREAD             0x00000444
+#define PERFCTR_CORE_FIXED_ANYTHREAD             CONST64U(0x00000444)
 // XXX serebrin/dhecht: 1-10-11: Make ANYTHREAD depend on number of fixed PMCs
+
+#define PERFCTR_CORE_GLOBAL_STATUS_OVFBUFFER     (1ULL << 62)
 
 /* Architectural event counters */
 #define PERFCTR_CORE_UNHALTED_CORE_CYCLES        0x3c
@@ -474,6 +478,13 @@
 #define PERFCTR_NEHALEM_OFFCORE_RESP0_EVENT      (0xB7 | (0x01 << 8))
 #define PERFCTR_NEHALEM_OFFCORE_RESP1_EVENT      (0xBB | (0x01 << 8))
 
+/* Intel TSX performance events introduced on Haswell */
+#define PERFCTR_HASWELL_HLE_RETIRED_START        (0xc8 | (0x01 << 8))
+#define PERFCTR_HASWELL_HLE_RETIRED_COMMIT       (0xc8 | (0x02 << 8))
+#define PERFCTR_HASWELL_HLE_RETIRED_ABORT        (0xc8 | (0x04 << 8))
+#define PERFCTR_HASWELL_RTM_RETIRED_START        (0xc9 | (0x01 << 8))
+#define PERFCTR_HASWELL_RTM_RETIRED_COMMIT       (0xc9 | (0x02 << 8))
+#define PERFCTR_HASWELL_RTM_RETIRED_ABORT        (0xc9 | (0x04 << 8))
 
 /*
  * Nehalem off-core response events. See Section 30.6.1.2 of the
@@ -601,28 +612,16 @@
  * PerfCtr_Counter --
  *      Describes a single hardware performance counter
  *
- *      cccrAddr/Val and escrAddr/Val are Pentium-4 specific names, and can
- *      cause confusion for K8/P6 (PR 105843).  Maybe we should use a union.
+ *      Since this is only used to record general performance counters, we
+ *      made the assumption in nmiProfiler.c  that the type is GENERAL and
+ *      index is counter number of type GENERAL.
  *      
- *      On Pentium 4:
- *      index:    Which perf ctr, from 0 to 17.  RDPMC argument.
- *      addr:     MSR # of raw 40 bit perf ctr reg (0x300 + index).
- *      cccrAddr: MSR # of control cfg reg         (0x360 + index).
- *      cccrVal:  Value placed in MSR cccrAddr.  Partially specifies what's
- *                being measured, with help from an escr register.  The escr
- *                MSR number is a function of cccrAddr and the escr specifier
- *                bits of cccrVal.
- *      escrAddr: There are 40+ of these MSRs, skip-numbered 0x3a0 to 0x3f0.
- *                Contains event select/mask, OS/USR flags, but not bits like
- *                enable or overflow, which are in the cccr.
- *      escrVal:  Value placed in MSR #escrAddr.
  *      
  *      On AMD K8 and GH:
  *      index:        Which perf ctr, 0 to 3.  RDPMC argument
  *      addr:         MSR of raw perf ctr              (0xc0010004 + index).
  *      escrAddr:     MSR # of the Perf Event Selector (0xc0010000 + index).
  *      escrVal:      Value placed in PerfEvtSel MSR; what to measure.
- *      cccrAddr/Val: we set these to 0.
  *
  *      On AMD BD:
  *      index:        Which perf ctr, 0 to 5.  RDPMC argument
@@ -631,23 +630,6 @@
  *      escrAddr:     MSR # of the Perf Event Selector (0xc0010200 + 2 * index).
  *                                  aliased PMCs 0 - 3 (0xc0010000 + index).
  *      escrVal:      Value placed in PerfEvtSel MSR; what to measure.
- *      cccrAddr/Val: we set these to 0.
- *
- *      On Intel P6 family:
- *      index:        Which perf ctr, 0 or 1.  RDPMC argument.
- *      addr:         MSR of raw perf counter      (0x000000c1 + index).
- *      escrAddr:     MSR # of Perf Event Selector (0x00000186 + index).
- *      escrVal:      Value placed in PerfEvtSel MSR; what to measure.
- *                    Note: 'enable' bit only defined for MSR 0x186 and it
- *                    applies to both perf ctrs, so either both or neither perf
- *                    counter is active at a time.  So it's a good idea to
- *                    sanely define the "other, don't care" MSR, to avoid
- *                    possible undesired overflow intrs (PerfEventSel val 0
- *                    may be OK since OS/USR bits both 0 means no increment).
- *      cccrAddr/Val: If desired, these can hold the MSR addr/val of the other,
- *                    don't-care, perf ctr, so it can be sanely programmed in
- *                    the presence of undesired 'enable' bit behavior (see
- *                    above).  But vmkernel currently sets these to 0, like K8.
  * 
  *      No field should be greater than 32-bit as it is shared with monitor.
  *
@@ -675,7 +657,7 @@ typedef struct PerfCtr_Config {
     * periodJitterMask) is used to randomize sampling interval.
     */
    uint32  periodJitterMask;
-   uint32  seed;    // seed is used to compute next random number        
+   uint32  seed;    // seed is used to compute next random number          
    uint32  config;
    uint32  unitMask;
    uint64  eventSelReg;
@@ -702,13 +684,9 @@ typedef struct PerfCtr_ConfigBasic {
  */
 static INLINE void
 PerfCtrWriteEvtSel(PerfCtr_Counter *ctr,  // IN: counter to write
-                   uint32 escrVal,        // IN: event register value
-                   uint32 controlVal)     // IN: control reg value to write (P4)
+                   uint32 escrVal)        // IN: event register value
 {
    __SET_MSR(ctr->escrAddr, escrVal);
-   if (ctr->cccrAddr != 0) {
-      WRMSR(ctr->cccrAddr, controlVal, 0);
-   }
 }
 
 
@@ -756,7 +734,8 @@ PerfCtr_SelValidBits(Bool amd)
       bits |= PERFCTR_AMD_EXT_EVENT_MASK | PERFCTR_AMD_EVTSEL_HOST |
               PERFCTR_AMD_EVTSEL_GUEST;
    } else {
-      bits |= PERFCTR_CORE_ANYTHREAD;
+      bits |= PERFCTR_CORE_ANYTHREAD | PERFCTR_CORE_IN_TX |
+              PERFCTR_CORE_IN_TXCP;
    }
    return bits;
 }
@@ -785,151 +764,151 @@ PerfCtr_PgcToOvfValidBits(uint64 pgcValBits)
 
 /* --------- BEGIN INTEL DEFINES ------------------------ */
 
-#define PENTIUM4_MSR_BPU_COUNTER0_IDX		0
-#define PENTIUM4_MSR_BPU_COUNTER0_ADDR		0x300
-#define PENTIUM4_MSR_BPU_CCCR0	       	        0x360
-#define PENTIUM4_MSR_BPU_COUNTER1_IDX		1
-#define PENTIUM4_MSR_BPU_COUNTER1_ADDR		0x301
-#define PENTIUM4_MSR_BPU_CCCR1		        0x361
-#define PENTIUM4_MSR_BPU_COUNTER2_IDX		2
-#define PENTIUM4_MSR_BPU_COUNTER2_ADDR		0x302
-#define PENTIUM4_MSR_BPU_CCCR2		        0x362
-#define PENTIUM4_MSR_BPU_COUNTER3_IDX		3
-#define PENTIUM4_MSR_BPU_COUNTER3_ADDR		0x303
-#define PENTIUM4_MSR_BPU_CCCR3		        0x363
-#define PENTIUM4_MSR_MS_COUNTER0_IDX		4
-#define PENTIUM4_MSR_MS_COUNTER0_ADDR		0x304
-#define PENTIUM4_MSR_MS_CCCR0		        0x364
-#define PENTIUM4_MSR_MS_COUNTER1_IDX		5
-#define PENTIUM4_MSR_MS_COUNTER1_ADDR		0x305
-#define PENTIUM4_MSR_MS_CCCR1		        0x365
-#define PENTIUM4_MSR_MS_COUNTER2_IDX		6
-#define PENTIUM4_MSR_MS_COUNTER2_ADDR		0x306
-#define PENTIUM4_MSR_MS_CCCR2		        0x366
-#define PENTIUM4_MSR_MS_COUNTER3_IDX		7
-#define PENTIUM4_MSR_MS_COUNTER3_ADDR		0x307
-#define PENTIUM4_MSR_MS_CCCR3		        0x367
+#define PENTIUM4_MSR_BPU_COUNTER0_IDX           0
+#define PENTIUM4_MSR_BPU_COUNTER0_ADDR          0x300
+#define PENTIUM4_MSR_BPU_CCCR0                  0x360
+#define PENTIUM4_MSR_BPU_COUNTER1_IDX           1
+#define PENTIUM4_MSR_BPU_COUNTER1_ADDR          0x301
+#define PENTIUM4_MSR_BPU_CCCR1                  0x361
+#define PENTIUM4_MSR_BPU_COUNTER2_IDX           2
+#define PENTIUM4_MSR_BPU_COUNTER2_ADDR          0x302
+#define PENTIUM4_MSR_BPU_CCCR2                  0x362
+#define PENTIUM4_MSR_BPU_COUNTER3_IDX           3
+#define PENTIUM4_MSR_BPU_COUNTER3_ADDR          0x303
+#define PENTIUM4_MSR_BPU_CCCR3                  0x363
+#define PENTIUM4_MSR_MS_COUNTER0_IDX            4
+#define PENTIUM4_MSR_MS_COUNTER0_ADDR           0x304
+#define PENTIUM4_MSR_MS_CCCR0                   0x364
+#define PENTIUM4_MSR_MS_COUNTER1_IDX            5
+#define PENTIUM4_MSR_MS_COUNTER1_ADDR           0x305
+#define PENTIUM4_MSR_MS_CCCR1                   0x365
+#define PENTIUM4_MSR_MS_COUNTER2_IDX            6
+#define PENTIUM4_MSR_MS_COUNTER2_ADDR           0x306
+#define PENTIUM4_MSR_MS_CCCR2                   0x366
+#define PENTIUM4_MSR_MS_COUNTER3_IDX            7
+#define PENTIUM4_MSR_MS_COUNTER3_ADDR           0x307
+#define PENTIUM4_MSR_MS_CCCR3                   0x367
 #define PENTIUM4_MSR_FLAME_COUNTER0_IDX         8
 #define PENTIUM4_MSR_FLAME_COUNTER0_ADDR        0x308
-#define PENTIUM4_MSR_FLAME_CCCR0		0x368
+#define PENTIUM4_MSR_FLAME_CCCR0                0x368
 #define PENTIUM4_MSR_FLAME_COUNTER1_IDX         9
-#define PENTIUM4_MSR_FLAME_COUNTER1_ADDR	0x309
-#define PENTIUM4_MSR_FLAME_CCCR1		0x369
-#define PENTIUM4_MSR_FLAME_COUNTER2_IDX		10
-#define PENTIUM4_MSR_FLAME_COUNTER2_ADDR	0x30A
-#define PENTIUM4_MSR_FLAME_CCCR2		0x36A
-#define PENTIUM4_MSR_FLAME_COUNTER3_IDX		11
-#define PENTIUM4_MSR_FLAME_COUNTER3_ADDR	0x30B
-#define PENTIUM4_MSR_FLAME_CCCR3		0x36B
-#define PENTIUM4_MSR_IQ_COUNTER0_IDX		12
-#define PENTIUM4_MSR_IQ_COUNTER0_ADDR		0x30C
-#define PENTIUM4_MSR_IQ_CCCR0		        0x36C
-#define PENTIUM4_MSR_IQ_COUNTER1_IDX		13
-#define PENTIUM4_MSR_IQ_COUNTER1_ADDR		0x30D
-#define PENTIUM4_MSR_IQ_CCCR1		        0x36D
-#define PENTIUM4_MSR_IQ_COUNTER2_IDX		14
-#define PENTIUM4_MSR_IQ_COUNTER2_ADDR		0x30E
-#define PENTIUM4_MSR_IQ_CCCR2		        0x36E
-#define PENTIUM4_MSR_IQ_COUNTER3_IDX		15
-#define PENTIUM4_MSR_IQ_COUNTER3_ADDR		0x30F
-#define PENTIUM4_MSR_IQ_CCCR3		        0x36F
-#define PENTIUM4_MSR_IQ_COUNTER4_IDX		16
-#define PENTIUM4_MSR_IQ_COUNTER4_ADDR		0x310
-#define PENTIUM4_MSR_IQ_CCCR4		        0x370
-#define PENTIUM4_MSR_IQ_COUNTER5_IDX		17
-#define PENTIUM4_MSR_IQ_COUNTER5_ADDR		0x311
-#define PENTIUM4_MSR_IQ_CCCR5		        0x371
+#define PENTIUM4_MSR_FLAME_COUNTER1_ADDR        0x309
+#define PENTIUM4_MSR_FLAME_CCCR1                0x369
+#define PENTIUM4_MSR_FLAME_COUNTER2_IDX         10
+#define PENTIUM4_MSR_FLAME_COUNTER2_ADDR        0x30A
+#define PENTIUM4_MSR_FLAME_CCCR2                0x36A
+#define PENTIUM4_MSR_FLAME_COUNTER3_IDX         11
+#define PENTIUM4_MSR_FLAME_COUNTER3_ADDR        0x30B
+#define PENTIUM4_MSR_FLAME_CCCR3                0x36B
+#define PENTIUM4_MSR_IQ_COUNTER0_IDX            12
+#define PENTIUM4_MSR_IQ_COUNTER0_ADDR           0x30C
+#define PENTIUM4_MSR_IQ_CCCR0                   0x36C
+#define PENTIUM4_MSR_IQ_COUNTER1_IDX            13
+#define PENTIUM4_MSR_IQ_COUNTER1_ADDR           0x30D
+#define PENTIUM4_MSR_IQ_CCCR1                   0x36D
+#define PENTIUM4_MSR_IQ_COUNTER2_IDX            14
+#define PENTIUM4_MSR_IQ_COUNTER2_ADDR           0x30E
+#define PENTIUM4_MSR_IQ_CCCR2                   0x36E
+#define PENTIUM4_MSR_IQ_COUNTER3_IDX            15
+#define PENTIUM4_MSR_IQ_COUNTER3_ADDR           0x30F
+#define PENTIUM4_MSR_IQ_CCCR3                   0x36F
+#define PENTIUM4_MSR_IQ_COUNTER4_IDX            16
+#define PENTIUM4_MSR_IQ_COUNTER4_ADDR           0x310
+#define PENTIUM4_MSR_IQ_CCCR4                   0x370
+#define PENTIUM4_MSR_IQ_COUNTER5_IDX            17
+#define PENTIUM4_MSR_IQ_COUNTER5_ADDR           0x311
+#define PENTIUM4_MSR_IQ_CCCR5                   0x371
 
-#define PENTIUM4_MSR_ALF_ESCR0_IDX		1
-#define PENTIUM4_MSR_ALF_ESCR0_ADDR		0x3CA
-#define PENTIUM4_MSR_ALF_ESCR1_IDX		1
-#define PENTIUM4_MSR_ALF_ESCR1_ADDR		0x3CB
-#define PENTIUM4_MSR_BPU_ESCR0_IDX		0
-#define PENTIUM4_MSR_BPU_ESCR0_ADDR		0x3B2
-#define PENTIUM4_MSR_BPU_ESCR1_IDX		0
-#define PENTIUM4_MSR_BPU_ESCR1_ADDR		0x3B3
-#define PENTIUM4_MSR_BSU_ESCR0_IDX		7
-#define PENTIUM4_MSR_BSU_ESCR0_ADDR		0x3A0
-#define PENTIUM4_MSR_BSU_ESCR1_IDX		7
-#define PENTIUM4_MSR_BSU_ESCR1_ADDR		0x3A1
-#define PENTIUM4_MSR_CRU_ESCR0_IDX		4
-#define PENTIUM4_MSR_CRU_ESCR0_ADDR		0x3B8
-#define PENTIUM4_MSR_CRU_ESCR1_IDX		4
-#define PENTIUM4_MSR_CRU_ESCR1_ADDR		0x3B9
-#define PENTIUM4_MSR_CRU_ESCR2_IDX		5
-#define PENTIUM4_MSR_CRU_ESCR2_ADDR		0x3CC
-#define PENTIUM4_MSR_CRU_ESCR3_IDX		5
-#define PENTIUM4_MSR_CRU_ESCR3_ADDR		0x3CD
-#define PENTIUM4_MSR_CRU_ESCR4_IDX		6
-#define PENTIUM4_MSR_CRU_ESCR4_ADDR		0x3E0
-#define PENTIUM4_MSR_CRU_ESCR5_IDX		6
-#define PENTIUM4_MSR_CRU_ESCR5_ADDR		0x3E1
-#define PENTIUM4_MSR_DAC_ESCR0_IDX		5
-#define PENTIUM4_MSR_DAC_ESCR0_ADDR		0x3A8
-#define PENTIUM4_MSR_DAC_ESCR1_IDX		5
-#define PENTIUM4_MSR_DAC_ESCR1_ADDR		0x3A9
-#define PENTIUM4_MSR_FIRM_ESCR0_IDX		1
-#define PENTIUM4_MSR_FIRM_ESCR0_ADDR		0x3A4
-#define PENTIUM4_MSR_FIRM_ESCR1_IDX		1
-#define PENTIUM4_MSR_FIRM_ESCR1_ADDR		0x3A5
-#define PENTIUM4_MSR_FLAME_ESCR0_IDX		0
-#define PENTIUM4_MSR_FLAME_ESCR0_ADDR		0x3A6
-#define PENTIUM4_MSR_FLAME_ESCR1_IDX		0
-#define PENTIUM4_MSR_FLAME_ESCR1_ADDR		0x3A7
-#define PENTIUM4_MSR_FSB_ESCR0_IDX		6
-#define PENTIUM4_MSR_FSB_ESCR0_ADDR		0x3A2
-#define PENTIUM4_MSR_FSB_ESCR1_IDX		6
-#define PENTIUM4_MSR_FSB_ESCR1_ADDR		0x3A3
-#define PENTIUM4_MSR_IQ_ESCR0_IDX		0
-#define PENTIUM4_MSR_IQ_ESCR0_ADDR		0x3BA
-#define PENTIUM4_MSR_IQ_ESCR1_IDX		0
-#define PENTIUM4_MSR_IQ_ESCR1_ADDR		0x3BB
-#define PENTIUM4_MSR_IS_ESCR0_IDX		1
-#define PENTIUM4_MSR_IS_ESCR0_ADDR		0x3B4
-#define PENTIUM4_MSR_IS_ESCR1_IDX		1
-#define PENTIUM4_MSR_IS_ESCR1_ADDR		0x3B5
-#define PENTIUM4_MSR_ITLB_ESCR0_IDX		3
-#define PENTIUM4_MSR_ITLB_ESCR0_ADDR		0x3B6
-#define PENTIUM4_MSR_ITLB_ESCR1_IDX		3
-#define PENTIUM4_MSR_ITLB_ESCR1_ADDR		0x3B7
-#define PENTIUM4_MSR_IX_ESCR0_IDX		5
-#define PENTIUM4_MSR_IX_ESCR0_ADDR		0x3C8
-#define PENTIUM4_MSR_IX_ESCR1_IDX		5
-#define PENTIUM4_MSR_IX_ESCR1_ADDR		0x3C9
-#define PENTIUM4_MSR_MOB_ESCR0_IDX		2
-#define PENTIUM4_MSR_MOB_ESCR0_ADDR		0x3AA
-#define PENTIUM4_MSR_MOB_ESCR1_IDX		2
-#define PENTIUM4_MSR_MOB_ESCR1_ADDR		0x3AB
-#define PENTIUM4_MSR_MS_ESCR0_IDX		0
-#define PENTIUM4_MSR_MS_ESCR0_ADDR		0x3C0
-#define PENTIUM4_MSR_MS_ESCR1_IDX		0
-#define PENTIUM4_MSR_MS_ESCR1_ADDR		0x3C1
-#define PENTIUM4_MSR_PMH_ESCR0_IDX		4
-#define PENTIUM4_MSR_PMH_ESCR0_ADDR		0x3AC
-#define PENTIUM4_MSR_PMH_ESCR1_IDX		4
-#define PENTIUM4_MSR_PMH_ESCR1_ADDR		0x3AD
-#define PENTIUM4_MSR_RAT_ESCR0_IDX		2
-#define PENTIUM4_MSR_RAT_ESCR0_ADDR		0x3BC
-#define PENTIUM4_MSR_RAT_ESCR1_IDX		2
-#define PENTIUM4_MSR_RAT_ESCR1_ADDR		0x3BD
-#define PENTIUM4_MSR_SAAT_ESCR0_IDX		2
-#define PENTIUM4_MSR_SAAT_ESCR0_ADDR		0x3AE
-#define PENTIUM4_MSR_SAAT_ESCR1_IDX		2
-#define PENTIUM4_MSR_SAAT_ESCR1_ADDR		0x3AF
-#define PENTIUM4_MSR_SSU_ESCR0_IDX		3
-#define PENTIUM4_MSR_SSU_ESCR0_ADDR		0x3BE
-#define PENTIUM4_MSR_TBPU_ESCR0_IDX		2
-#define PENTIUM4_MSR_TBPU_ESCR0_ADDR		0x3C2
-#define PENTIUM4_MSR_TBPU_ESCR1_IDX		2
-#define PENTIUM4_MSR_TBPU_ESCR1_ADDR		0x3C3
-#define PENTIUM4_MSR_TC_ESCR0_IDX		1
-#define PENTIUM4_MSR_TC_ESCR0_ADDR		0x3C4
-#define PENTIUM4_MSR_TC_ESCR1_IDX		1
-#define PENTIUM4_MSR_TC_ESCR1_ADDR		0x3C5
-#define PENTIUM4_MSR_U2L_ESCR0_IDX		3
-#define PENTIUM4_MSR_U2L_ESCR0_ADDR		0x3B0
-#define PENTIUM4_MSR_U2L_ESCR1_IDX		3
-#define PENTIUM4_MSR_U2L_ESCR1_ADDR		0x3B1
+#define PENTIUM4_MSR_ALF_ESCR0_IDX              1
+#define PENTIUM4_MSR_ALF_ESCR0_ADDR             0x3CA
+#define PENTIUM4_MSR_ALF_ESCR1_IDX              1
+#define PENTIUM4_MSR_ALF_ESCR1_ADDR             0x3CB
+#define PENTIUM4_MSR_BPU_ESCR0_IDX              0
+#define PENTIUM4_MSR_BPU_ESCR0_ADDR             0x3B2
+#define PENTIUM4_MSR_BPU_ESCR1_IDX              0
+#define PENTIUM4_MSR_BPU_ESCR1_ADDR             0x3B3
+#define PENTIUM4_MSR_BSU_ESCR0_IDX              7
+#define PENTIUM4_MSR_BSU_ESCR0_ADDR             0x3A0
+#define PENTIUM4_MSR_BSU_ESCR1_IDX              7
+#define PENTIUM4_MSR_BSU_ESCR1_ADDR             0x3A1
+#define PENTIUM4_MSR_CRU_ESCR0_IDX              4
+#define PENTIUM4_MSR_CRU_ESCR0_ADDR             0x3B8
+#define PENTIUM4_MSR_CRU_ESCR1_IDX              4
+#define PENTIUM4_MSR_CRU_ESCR1_ADDR             0x3B9
+#define PENTIUM4_MSR_CRU_ESCR2_IDX              5
+#define PENTIUM4_MSR_CRU_ESCR2_ADDR             0x3CC
+#define PENTIUM4_MSR_CRU_ESCR3_IDX              5
+#define PENTIUM4_MSR_CRU_ESCR3_ADDR             0x3CD
+#define PENTIUM4_MSR_CRU_ESCR4_IDX              6
+#define PENTIUM4_MSR_CRU_ESCR4_ADDR             0x3E0
+#define PENTIUM4_MSR_CRU_ESCR5_IDX              6
+#define PENTIUM4_MSR_CRU_ESCR5_ADDR             0x3E1
+#define PENTIUM4_MSR_DAC_ESCR0_IDX              5
+#define PENTIUM4_MSR_DAC_ESCR0_ADDR             0x3A8
+#define PENTIUM4_MSR_DAC_ESCR1_IDX              5
+#define PENTIUM4_MSR_DAC_ESCR1_ADDR             0x3A9
+#define PENTIUM4_MSR_FIRM_ESCR0_IDX             1
+#define PENTIUM4_MSR_FIRM_ESCR0_ADDR            0x3A4
+#define PENTIUM4_MSR_FIRM_ESCR1_IDX             1
+#define PENTIUM4_MSR_FIRM_ESCR1_ADDR            0x3A5
+#define PENTIUM4_MSR_FLAME_ESCR0_IDX            0
+#define PENTIUM4_MSR_FLAME_ESCR0_ADDR           0x3A6
+#define PENTIUM4_MSR_FLAME_ESCR1_IDX            0
+#define PENTIUM4_MSR_FLAME_ESCR1_ADDR           0x3A7
+#define PENTIUM4_MSR_FSB_ESCR0_IDX              6
+#define PENTIUM4_MSR_FSB_ESCR0_ADDR             0x3A2
+#define PENTIUM4_MSR_FSB_ESCR1_IDX              6
+#define PENTIUM4_MSR_FSB_ESCR1_ADDR             0x3A3
+#define PENTIUM4_MSR_IQ_ESCR0_IDX               0
+#define PENTIUM4_MSR_IQ_ESCR0_ADDR              0x3BA
+#define PENTIUM4_MSR_IQ_ESCR1_IDX               0
+#define PENTIUM4_MSR_IQ_ESCR1_ADDR              0x3BB
+#define PENTIUM4_MSR_IS_ESCR0_IDX               1
+#define PENTIUM4_MSR_IS_ESCR0_ADDR              0x3B4
+#define PENTIUM4_MSR_IS_ESCR1_IDX               1
+#define PENTIUM4_MSR_IS_ESCR1_ADDR              0x3B5
+#define PENTIUM4_MSR_ITLB_ESCR0_IDX             3
+#define PENTIUM4_MSR_ITLB_ESCR0_ADDR            0x3B6
+#define PENTIUM4_MSR_ITLB_ESCR1_IDX             3
+#define PENTIUM4_MSR_ITLB_ESCR1_ADDR            0x3B7
+#define PENTIUM4_MSR_IX_ESCR0_IDX               5
+#define PENTIUM4_MSR_IX_ESCR0_ADDR              0x3C8
+#define PENTIUM4_MSR_IX_ESCR1_IDX               5
+#define PENTIUM4_MSR_IX_ESCR1_ADDR              0x3C9
+#define PENTIUM4_MSR_MOB_ESCR0_IDX              2
+#define PENTIUM4_MSR_MOB_ESCR0_ADDR             0x3AA
+#define PENTIUM4_MSR_MOB_ESCR1_IDX              2
+#define PENTIUM4_MSR_MOB_ESCR1_ADDR             0x3AB
+#define PENTIUM4_MSR_MS_ESCR0_IDX               0
+#define PENTIUM4_MSR_MS_ESCR0_ADDR              0x3C0
+#define PENTIUM4_MSR_MS_ESCR1_IDX               0
+#define PENTIUM4_MSR_MS_ESCR1_ADDR              0x3C1
+#define PENTIUM4_MSR_PMH_ESCR0_IDX              4
+#define PENTIUM4_MSR_PMH_ESCR0_ADDR             0x3AC
+#define PENTIUM4_MSR_PMH_ESCR1_IDX              4
+#define PENTIUM4_MSR_PMH_ESCR1_ADDR             0x3AD
+#define PENTIUM4_MSR_RAT_ESCR0_IDX              2
+#define PENTIUM4_MSR_RAT_ESCR0_ADDR             0x3BC
+#define PENTIUM4_MSR_RAT_ESCR1_IDX              2
+#define PENTIUM4_MSR_RAT_ESCR1_ADDR             0x3BD
+#define PENTIUM4_MSR_SAAT_ESCR0_IDX             2
+#define PENTIUM4_MSR_SAAT_ESCR0_ADDR            0x3AE
+#define PENTIUM4_MSR_SAAT_ESCR1_IDX             2
+#define PENTIUM4_MSR_SAAT_ESCR1_ADDR            0x3AF
+#define PENTIUM4_MSR_SSU_ESCR0_IDX              3
+#define PENTIUM4_MSR_SSU_ESCR0_ADDR             0x3BE
+#define PENTIUM4_MSR_TBPU_ESCR0_IDX             2
+#define PENTIUM4_MSR_TBPU_ESCR0_ADDR            0x3C2
+#define PENTIUM4_MSR_TBPU_ESCR1_IDX             2
+#define PENTIUM4_MSR_TBPU_ESCR1_ADDR            0x3C3
+#define PENTIUM4_MSR_TC_ESCR0_IDX               1
+#define PENTIUM4_MSR_TC_ESCR0_ADDR              0x3C4
+#define PENTIUM4_MSR_TC_ESCR1_IDX               1
+#define PENTIUM4_MSR_TC_ESCR1_ADDR              0x3C5
+#define PENTIUM4_MSR_U2L_ESCR0_IDX              3
+#define PENTIUM4_MSR_U2L_ESCR0_ADDR             0x3B0
+#define PENTIUM4_MSR_U2L_ESCR1_IDX              3
+#define PENTIUM4_MSR_U2L_ESCR1_ADDR             0x3B1
 
 #define PENTIUM4_MIN_ESCR_ADDR                  0x3A0
 #define PENTIUM4_MAX_ESCR_ADDR                  0x3E1
@@ -952,7 +931,8 @@ typedef struct NMIShared { /* shared with vmx and vmkernel */
 } NMIShared;
 
 /*
- * CrossProf: structures for unified profiling of vmm, vmx, and vmkernel.  Per-vcpu.
+ * CrossProf: structures for unified profiling of vmm, vmx, and
+ * vmkernel.  Per-vcpu.
  */
 
 #define CALLSTACK_CROSSPROF_PAGES 1

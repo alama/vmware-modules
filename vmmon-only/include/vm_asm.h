@@ -32,6 +32,7 @@
 #define INCLUDE_ALLOW_DISTRIBUTE
 #define INCLUDE_ALLOW_VMCORE
 #define INCLUDE_ALLOW_VMMON
+#define INCLUDE_ALLOW_USERLEVEL
 #include "includeCheck.h"
 
 #include "vm_basic_asm.h"

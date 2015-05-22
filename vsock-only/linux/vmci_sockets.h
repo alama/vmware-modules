@@ -1,5 +1,5 @@
 /*********************************************************
- * Copyright (C) 2007-2012 VMware, Inc. All rights reserved.
+ * Copyright (C) 2007-2014 VMware, Inc. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License as published by the
@@ -19,7 +19,7 @@
 /*
  * vmci_sockets.h --
  *
- *    VMCI sockets public constants and types.
+ *    vSockets public constants and types.
  */
 
 #ifndef _VMCI_SOCKETS_H_
@@ -559,9 +559,9 @@ struct uuid_2_cid {
       int fd;
       unsigned int version;
 
-      fd = open(VMCI_SOCKETS_DEFAULT_DEVICE, O_RDWR);
+      fd = open(VMCI_SOCKETS_DEFAULT_DEVICE, O_RDONLY);
       if (fd < 0) {
-         fd = open(VMCI_SOCKETS_CLASSIC_ESX_DEVICE, O_RDWR);
+         fd = open(VMCI_SOCKETS_CLASSIC_ESX_DEVICE, O_RDONLY);
          if (fd < 0) {
             return VMCI_SOCKETS_INVALID_VERSION;
          }
@@ -581,9 +581,9 @@ struct uuid_2_cid {
     *
     * \brief Retrieve the address family value for vSockets.
     *
-    * Returns the value to be used for the VMCI Sockets address family.
+    * Returns the value to be used for the vSockets address family.
     * This value should be used as the domain argument to \c socket(2) (when
-    * you might otherwise use \c AF_INET).  For VMCI Socket-specific options,
+    * you might otherwise use \c AF_INET).  For vSocket-specific options,
     * this value should also be used for the level argument to
     * \c setsockopt(2) (when you might otherwise use \c SOL_TCP).
     *
@@ -619,7 +619,7 @@ struct uuid_2_cid {
    static inline int VMCISock_GetAFValueFd(int *outFd)
    {
       int fd;
-      int family;
+      int family = -1;
 
 #if defined(linux)
       /*
@@ -644,9 +644,9 @@ struct uuid_2_cid {
 #undef AF_VSOCK_LOCAL
 #endif // linux
 
-      fd = open(VMCI_SOCKETS_DEFAULT_DEVICE, O_RDWR);
+      fd = open(VMCI_SOCKETS_DEFAULT_DEVICE, O_RDONLY);
       if (fd < 0) {
-         fd = open(VMCI_SOCKETS_CLASSIC_ESX_DEVICE, O_RDWR);
+         fd = open(VMCI_SOCKETS_CLASSIC_ESX_DEVICE, O_RDONLY);
          if (fd < 0) {
             return -1;
          }
@@ -672,9 +672,9 @@ struct uuid_2_cid {
     *
     * \brief Retrieve the address family value for vSockets.
     *
-    * Returns the value to be used for the VMCI Sockets address family.
+    * Returns the value to be used for the vSockets address family.
     * This value should be used as the domain argument to \c socket(2) (when
-    * you might otherwise use \c AF_INET).  For VMCI Socket-specific options,
+    * you might otherwise use \c AF_INET).  For vSocket-specific options,
     * this value should also be used for the level argument to
     * \c setsockopt(2) (when you might otherwise use \c SOL_TCP).
     *
@@ -765,9 +765,9 @@ struct uuid_2_cid {
       int fd;
       unsigned int contextId;
 
-      fd = open(VMCI_SOCKETS_DEFAULT_DEVICE, O_RDWR);
+      fd = open(VMCI_SOCKETS_DEFAULT_DEVICE, O_RDONLY);
       if (fd < 0) {
-         fd = open(VMCI_SOCKETS_CLASSIC_ESX_DEVICE, O_RDWR);
+         fd = open(VMCI_SOCKETS_CLASSIC_ESX_DEVICE, O_RDONLY);
          if (fd < 0) {
             return VMADDR_CID_ANY;
          }
@@ -818,9 +818,9 @@ struct uuid_2_cid {
       int fd;
       struct uuid_2_cid io;
 
-      fd = open(VMCI_SOCKETS_DEFAULT_DEVICE, O_RDWR);
+      fd = open(VMCI_SOCKETS_DEFAULT_DEVICE, O_RDONLY);
       if (fd < 0) {
-         fd = open(VMCI_SOCKETS_CLASSIC_ESX_DEVICE, O_RDWR);
+         fd = open(VMCI_SOCKETS_CLASSIC_ESX_DEVICE, O_RDONLY);
          if (fd < 0) {
             return VMADDR_CID_ANY;
          }

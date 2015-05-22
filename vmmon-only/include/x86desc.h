@@ -1,5 +1,5 @@
 /*********************************************************
- * Copyright (C) 1998-2012 VMware, Inc. All rights reserved.
+ * Copyright (C) 1998-2013 VMware, Inc. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License as published by the
@@ -27,7 +27,6 @@
 #define INCLUDE_ALLOW_VMKERNEL
 #define INCLUDE_ALLOW_DISTRIBUTE
 #define INCLUDE_ALLOW_VMCORE
-#define INCLUDE_ALLOW_VMIROM
 #include "includeCheck.h"
 
 #include "x86segdescrs.h"
@@ -569,23 +568,19 @@ typedef struct Gate64 {
  * Need to pack the DTR struct so the offset starts right after the
  * limit.  
  */
-typedef
-#include "vmware_pack_begin.h"
-struct DTR32 {
+#pragma pack(push, 1)
+typedef struct DTR32 {
    uint16 limit;
    uint32 offset;
-} 
-#include "vmware_pack_end.h"
-DTR32;
+} DTR32;
+#pragma pack(pop)
 
-typedef 
-#include "vmware_pack_begin.h"
-struct DTR64 {
+#pragma pack(push, 1)
+typedef struct DTR64 {
    uint16 limit;
    uint64 offset;
-} 
-#include "vmware_pack_end.h"
-DTR64;
+} DTR64;
+#pragma pack(pop)
 
 #if defined VMM || defined FROBOS_LONGMODE || defined VM_X86_64
 typedef DTR64 DTR;

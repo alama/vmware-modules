@@ -1,5 +1,5 @@
 /*********************************************************
- * Copyright (C) 1998-2011 VMware, Inc. All rights reserved.
+ * Copyright (C) 1998-2014 VMware, Inc. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License as published by the
@@ -52,12 +52,11 @@
    MC(USERRETURN)   /* Return codes for user calls. */                        \
    MC(GET_RECYCLED_PAGES)                                                     \
    MC(RELEASE_ANON_PAGES)                                                     \
-   MC(IS_ANON_PAGE)                                                           \
    MC(LOOKUP_MPN)                                                             \
    MC(COSCHED)                                                                \
-   MC(START_VMX_OP) /* Intel VT VMX operation. Not VMX userlevel process. */  \
    MC(ALLOC_VMX_PAGE)                                                         \
-   MC(ALLOC_TMP_GDT)
+   MC(ALLOC_TMP_GDT)                                                          \
+   MC(PIN_MPN)
 
 /*
  *----------------------------------------------------------------------
@@ -79,9 +78,6 @@ typedef enum ModuleCallType {
 #undef MC
    MODULECALL_LAST                   // Number of entries. Must be the last one
 } ModuleCallType;
-
-#define MODULECALL_USER_START 300
-#define MODULECALL_USER_END   400
 
 #define MODULECALL_CROSS_PAGE_LEN    1
 #define MODULECALL_CROSS_PAGE_START  6
@@ -132,27 +128,16 @@ typedef enum UCCostStamp {
 #endif // VMX86_SERVER
 
 /*
- * Header for the wsBody32.S and wsBody64.S worldswitch code files.
- * The wsBody32 or wsBody64 module loaded depends on the host bitsize.
+ * Header for the wsBody64.S worldswitch code file.
  */
 typedef struct WSModule {
    uint32 vmmonVersion;  // VMMON_VERSION when assembled as part of monitor
-   uint16 moduleSize;    // size of whole wsBody{32,64} module
-   uint16 hostToVmm;     // offset from beg of header to Host{32,64}toVmm
+   uint16 moduleSize;    // size of whole wsBody64 module
+   uint16 hostToVmm;     // offset from beginning of header to hostToVmm
    uint16 vmm64ToHost;
-   uint16 handleUD;
-   uint16 handleGP;
+   uint16 _pad[3];
 
-   struct {              // offsets to patches (32-bit worldswitch only)
-      uint16 ljmplma;
-      uint16 ljmplmabig;
-      uint16 va2pa;
-      uint16 jump32Dest;
-      uint16 pa2va;
-   } ws32Patches;
-
-   uint8 code[1024];      // big enough for MAX('.wsBody32', '.wsBody64',
-                          //                    'wsBody32Log', 'wsBody64Log')
+   uint8 code[1024];      // big enough for MAX('.wsBody64', 'wsBody64Log')
 } WSModule;
 
 typedef
@@ -177,7 +162,6 @@ typedef
 #include "vmware_pack_begin.h"
 struct SwitchNMI {                                // see switchNMI.S
    uint16           switchNMISize;
-   SwitchNMIOffsets host32;                       // offsets to 32-bit handlers
    SwitchNMIOffsets host64;                       // offsets to 64-bit handlers
    volatile Bool    wsException[NUM_EXCEPTIONS];  // EXC_DE ... EXC_XF
                                                   // TRUE -> fault occurred in
@@ -282,8 +266,7 @@ struct VMM64PageTablePatch {
 #include "vmware_pack_end.h"
 VMM64PageTablePatch;
 
-#define MAX_DUMMY_VMCSES    16
-#define MODULECALL_NUM_ARGS  8
+#define MODULECALL_NUM_ARGS  4
 
 /*
  *----------------------------------------------------------------------
@@ -305,16 +288,14 @@ struct VMCrossPageData {
     */
    uint32   tinyStack[46];
 
-   uint64   hostCR4;            // host CR4 & ~CR4_PGE
+   uint64   hostCR3;
    uint32   crosspageMA;
 
    uint8    hostDRSaved;        // Host DR spilled to hostDR[x].
    uint8    hostDRInHW;         // 0 -> shadowDR in h/w, 1 -> hostDR in h/w.
                                 //   contains host-sized DB,NMI,MCE entries
    uint16   hostSS;
-   uint64   hostSwitchCR3;
    uint64   hostRSP;
-   uint64   hostCR3;
    uint64   hostDR[8];
    uint64   hostRBX;
    uint64   hostRSI;
@@ -325,15 +306,14 @@ struct VMCrossPageData {
    uint64   hostR14;
    uint64   hostR15;
    LA64     hostCrossPageLA;   // where host has crosspage mapped
-   uint16   hostInitial32CS;
    uint16   hostInitial64CS;
-   uint32   _pad0;
+   uint16   _pad0[3];
+
+   uint64   wsCR0;
+   uint64   wsCR4;
 
    DTR64    crossGDTHKLADesc;   // always uses host kernel linear address
    uint16   _pad1[3];
-   DTR64    crossGDTMADesc;     // always uses machine address,
-                                //   contains 32-bit DB, NMI, MCE entries
-   uint16   _pad2[3];
    DTR64    mon64GDTR;
    uint16   mon64ES;
    uint16   mon64SS;
@@ -351,13 +331,9 @@ struct VMCrossPageData {
    uint64   mon64RIP;
    Task64   monTask64;          /* vmm64's task */
 
-   FarPtr32 jump32Code;         // &worldswitch_64h_32v_mode_32compat
-   uint16   _pad3;
-
    VMM64PageTablePatch vmm64PTP[MAX_SWITCH_PT_PATCHES]; /* page table patch */
    LA64                vmm64CrossPageLA;
    LA64                vmm64CrossGDTLA;   // where crossGDT mapped by PT patch
-                                          //  32-bit host: machine address
                                           //  64-bit host: host kernel linear
                                           // address
 
@@ -370,12 +346,12 @@ struct VMCrossPageData {
     * the exception of MODULECALL_INTR which has a special effect.
     */
    ModuleCallType moduleCallType;
-   uint32         args[MODULECALL_NUM_ARGS];
    uint32         retval;
+   uint64         args[MODULECALL_NUM_ARGS];
    int            userCallType;
-   uint32         pcpuNum;
+   uint32         pcpuNum;   /* Used as extra module call arg within vmmon. */
 
-   VCPUSet yieldVCPUs;
+   VCPUSet        yieldVCPUs;
 
 #if !defined(VMX86_SERVER)
    uint64 ucTimeStamps[UCCOST_MAX];
@@ -390,8 +366,8 @@ struct VMCrossPageData {
    SharedUReg64     shadowDR[8];
    uint8            shadowDRInHW; // bit n set iff %DRn == shadowDR[n]
 
-   SystemCallState  systemCall;
-   uint8            _pad5[7];
+   SwitchedMSRState switchedMSRState;
+   uint8            _pad2[7];
 
    /*
     * Adjustment for machines where the hardware TSC does not run
@@ -403,67 +379,34 @@ struct VMCrossPageData {
    VmAbsoluteTS            worldSwitchPTSC; // PTSC value immediately before
                                             // last worldswitch.
 
-   /*
-    * PTSC value of the next MonTimer callback for this vcpu.  When the
-    * time arrives, if a target VCPU thread is in the monitor, it wants
-    * to receive a hardware interrupt (e.g., an IPI) as soon as
-    * possible; if it has called up to userlevel to halt, it wants to
-    * wake up as soon as possible.
-    */
-   VmAbsoluteTS monTimerExpiry;
+   VmAbsoluteTS timerIntrTS;    // PTSC of timer interrupt while in the vmm
+   VmAbsoluteTS hstTimerExpiry; // PTSC of host timer interrupt
+   VmAbsoluteTS monTimerExpiry; // PTSC of next MonTimer callback
 
-
-   /*
-    * A VMXON page used to return to VMX operation when leaving the
-    * monitor, if we had to leave VMX operation to enter the monitor.
-    * These pages are allocated per-PCPU, and this field must contain
-    * the VMXON page for the current PCPU when performing a
-    * world-switch.
-    */
-   MA     rootVMCS;
-
-   /*
-    * Dummy VMCSes used to ensure that the cached state of a foreign VMCS
-    * gets flushed to memory.
-    */
-   MA     dummyVMCS[MAX_DUMMY_VMCSES];
-
-   /*
-    * The current VMCS of a foreign hypervisor when we leave VMX
-    * operation to disable paging.
-    */
-   MA     foreignVMCS;
-
-   /*
-    * Set if the host is in VMX operation and we need to disable
-    * paging to switch between legacy mode and long mode.
-    */
-   uint32   inVMXOperation;
-
+   Bool     activateVMX;        // TRUE -> activate Intel VMX extensions
+   Bool     activateSVM;        // TRUE -> activate AMD SVM extensions
    Bool     retryWorldSwitch;   // TRUE -> return to host on host->vmm switch
    /*
     * TRUE if moduleCall was interrupted by signal. Only
     * vmmon uses this field to remember that it should
     * restart RunVM call, nobody else should look at it.
     */
-   Bool   moduleCallInterrupted;
-   uint16    _pad6;
+   Bool     moduleCallInterrupted;
+   uint8    _pad3[4];
 
    DTR64    switchHostIDTR;     // baseLA = switchHostIDT's host knl LA
-   DTR64    switchMixIDTR;      // has baseLA = switchMixIDT's MA
-                                //   contains 32-bit and 64-bit NMI, MCE entries
+   uint16   _pad4[3];
    DTR64    switchMon64IDTR;    // has baseLA = switchMon64IDT's monitor LA
                                 //   contains 64-bit DB,NMI,MCE entries
-   uint16   _pad7;
+   uint16   _pad5[3];
 
    /*
     * Descriptors and interrupt tables for switchNMI handlers.  Each
     * IDT has only enough space for the hardware exceptions; they are
-    * sized to accommodate 32-bit & 64-bit descriptors.
+    * sized to accommodate 64-bit descriptors.
     */
    uint8 switchHostIDT [sizeof(Gate64) * NUM_EXCEPTIONS]; // hostCS:hostVA
    uint8 switchMon64IDT[sizeof(Gate64) * NUM_EXCEPTIONS]; // 64-bit monCS:monVA
-   uint8 switchMixIDT  [sizeof(Gate64) * NUM_EXCEPTIONS]; // CROSSGDT_*CS:MA
 }
 #include "vmware_pack_end.h"
 VMCrossPageData;
@@ -517,7 +460,7 @@ struct VMCrossPage {
 #include "vmware_pack_end.h"
 VMCrossPage;
 
-#define CROSSPAGE_VERSION_BASE 0xbea /* increment by 1 */
+#define CROSSPAGE_VERSION_BASE 0xbef /* increment by 1 */
 #define CROSSPAGE_VERSION    ((CROSSPAGE_VERSION_BASE << 1) + WS_NMI_STRESS)
 
 #if !defined(VMX86_SERVER) && defined(VMM)

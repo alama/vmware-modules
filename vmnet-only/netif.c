@@ -149,7 +149,11 @@ VNetNetIf_Create(char *devName,  // IN:
    memcpy(deviceName, devName, sizeof deviceName);
    NULL_TERMINATE_STRING(deviceName);
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 18, 0) || defined(NET_NAME_USER)
+   dev = alloc_netdev(sizeof *netIf, deviceName, NET_NAME_USER, VNetNetIfSetup);
+#else
    dev = alloc_netdev(sizeof *netIf, deviceName, VNetNetIfSetup);
+#endif
    if (!dev) {
       retval = -ENOMEM;
       goto out;

@@ -80,7 +80,8 @@ typedef uint64 VmIntervalUS; // an unsigned delta in us
 
 typedef struct PTSCInfo {
    Bool             hwTSCsSynced;
-   uint8            _pad[7];
+   Bool             hwTSCsAdjusted;
+   uint8            _pad[6];
    int64            hz;
    uint32           kHz;
    uint32           mHz;
@@ -196,5 +197,39 @@ PTSC_Get(void)
 VmAbsoluteTS PTSC_Get(void);
 
 #endif
+
+/* 
+ *-----------------------------------------------------------------------------
+ *
+ * PTSC_HasSynchronizedTSCs --
+ *
+ *      Returns TRUE iff the platform TSCs are known to be synchronized.
+ * 
+ *-----------------------------------------------------------------------------
+ */
+
+static INLINE Bool
+PTSC_HasSynchronizedTSCs(void)
+{
+   return ptscInfo.hwTSCsSynced;
+}
+
+
+/* 
+ *-----------------------------------------------------------------------------
+ *
+ * PTSC_HostAdjustedTSCs --
+ *
+ *      Returns TRUE if the platform may have adjusted TSCs in an attempt
+ *      to sync them up.
+ *
+ *-----------------------------------------------------------------------------
+ */
+
+static INLINE Bool
+PTSC_HostAdjustedTSCs(void)
+{
+   return ptscInfo.hwTSCsAdjusted;
+}
 
 #endif /* ifndef _PTSC_H_ */

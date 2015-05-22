@@ -1,5 +1,5 @@
 /*********************************************************
- * Copyright (C) 1998 VMware, Inc. All rights reserved.
+ * Copyright (C) 1998-2013 VMware, Inc. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License as published by the
@@ -78,6 +78,7 @@ MSRQuery;
 #define MSR_APIC_BASE         0x0000001b
 #define MSR_SMI_COUNT         0x00000034 // Intel Nehalem Family
 #define MSR_FEATCTL           0x0000003a
+#define MSR_TSC_ADJUST        0x0000003b
 #define MSR_BIOS_UPDT_TRIG    0x00000079
 #define MSR_BIOS_SIGN_ID      0x0000008b
 #define MSR_PERFCTR0          0x000000c1
@@ -97,11 +98,13 @@ MSRQuery;
 #define MSR_CLOCK_MODULATION  0x0000019a
 #define MSR_MISC_ENABLE       0x000001a0
 #define MSR_DEBUGCTL          0x000001d9
+#define MSR_TSC_DEADLINE      0x000006e0
 #define MSR_EFER              0xc0000080
 #define MSR_FSBASE            0xc0000100
 #define MSR_GSBASE            0xc0000101
 #define MSR_KERNELGSBASE      0xc0000102
 #define MSR_TSC_AUX           0xc0000103
+#define MSR_BD_TSC_RATIO      0xc0000104
 
 #define MSR_MISC_FEATURES_ENABLES            0x140
 
@@ -212,7 +215,7 @@ typedef enum {
 /* x2APIC MSRs */
 #define MSR_X2APIC_BASE      0x00000800
 #define MSR_X2APIC_MAX       0x0000083f
-#define MSR_X2APIC_LIMIT     0x000008ff
+#define MSR_X2APIC_LIMIT     0x00000bff
 #define MSR_X2APIC_ID        0x00000802
 #define MSR_X2APIC_VERSION   0x00000803
 #define MSR_X2APIC_TPR       0x00000808
@@ -236,6 +239,9 @@ typedef enum {
 #define MSR_X2APIC_CURCNT    0x00000839
 #define MSR_X2APIC_DIVIDER   0x0000083e
 #define MSR_X2APIC_SELFIPI   0x0000083f
+
+/* MSR_CR_PAT power-on value */
+#define MSR_CR_PAT_DEFAULT   0x0007040600070406ULL
 
 /* MSR_MISC_ENABLE bits (Intel) */
 #define MSR_MISC_ENABLE_FAST_STRINGS     (1LL<<0)  // Enable Fast string ops
@@ -263,7 +269,8 @@ typedef enum {
 #define MSR_DEBUGCTL_FREEZE_PERFMON_ON_PMI 0x00001000
 #define MSR_DEBUGCTL_ENABLE_UNCORE_PMI     0x00002000
 #define MSR_DEBUGCTL_FREEZE_WHILE_SMM      0x00004000
-#define MSR_DEBUGCTL_RSVD          0xffffffffffff803cULL
+#define MSR_DEBUGCTL_RTM                   0x00008000
+#define MSR_DEBUGCTL_RSVD          0xffffffffffff003cULL
 
 /* Feature control bits */
 #define MSR_FEATCTL_LOCK     0x00000001
@@ -279,7 +286,10 @@ typedef enum {
 #define MSR_EFER_SVME        0x0000000000001000ULL  /* SVM(AMD) enabled? r/w */
 #define MSR_EFER_LMSLE       0x0000000000002000ULL  /* LM seg lim enable:r/w */
 #define MSR_EFER_FFXSR       0x0000000000004000ULL  /* Fast FXSAVE:      r/w */
-#define MSR_EFER_MBZ         0xffffffffffff8200ULL  /* Must be zero (resrvd) */
+#define MSR_EFER_TCE         0x0000000000008000ULL  /* Trans. cache ext. r/w */
+#define MSR_EFER_MBZ         0xffffffffffff0200ULL  /* Must be zero (resrvd) */
+
+#define MSR_AMD_PATCH_LOADER 0xc0010020
 
 /* This ifndef is necessary because this is defined by some kernel headers. */
 #ifndef MSR_K7_HWCR
@@ -298,11 +308,11 @@ typedef enum {
 #define MSR_K8_TOPMEM2       0xc001001d
 
 /* AMD "Greyhound" MSRs */
-#define MSR_GH_CMPHLT		 0xc0010055  // Interrupt Pending & CMP Halt
+#define MSR_GH_CMPHLT            0xc0010055  // Interrupt Pending & CMP Halt
 #define MSR_GH_CMPHLT_C1E        (1ULL<<27)  // C1E on CMP Halt is enabled
 #define MSR_GH_CMPHLT_SMI        (1ULL<<28)  // SMI on CMP Halt is enabled
 
-#define MSR_GH_OSVW_LENGTH	 0xc0010140  // OS visible workaround length
+#define MSR_GH_OSVW_LENGTH       0xc0010140  // OS visible workaround length
 #define MSR_GH_OSVW_STATUS       0xc0010141  // OS visible workaround bits
 #define MSR_GH_OSVW_C1E          (1ULL<<1)   // Workaround for C1E not needed
 
@@ -395,6 +405,19 @@ typedef enum {
 #define MSR_HYPERV_STATS_VP_RETAIL_PAGE          0x400000E2
 #define MSR_HYPERV_STATS_VP_INTERNAL_PAGE        0x400000E3
 #define MSR_HYPERV_GUEST_IDLE                    0x400000F0
+#define MSR_HYPERV_SYNTH_DEBUG_CONTROL           0x400000F1
+#define MSR_HYPERV_SYNTH_DEBUG_STATUS            0x400000F2
+#define MSR_HYPERV_SYNTH_DEBUG_SEND_BUFFER       0x400000F3
+#define MSR_HYPERV_SYNTH_DEBUG_RECEIVE_BUFFER    0x400000F4
+#define MSR_HYPERV_SYNTH_DEBUG_PENDING_BUFFER    0x400000F5
+
+/* Guest Crash Enlightenment MSRs */
+#define MSR_HYPERV_CRASH_P0                      0x40000100
+#define MSR_HYPERV_CRASH_P1                      0x40000101
+#define MSR_HYPERV_CRASH_P2                      0x40000102
+#define MSR_HYPERV_CRASH_P3                      0x40000103
+#define MSR_HYPERV_CRASH_P4                      0x40000104
+#define MSR_HYPERV_CRASH_CTL                     0x40000105
 
 #define MSR_HYPERV_HYPERCALL_EN                  1ULL
 #define MSR_HYPERV_REFERENCE_TSC_EN              1ULL

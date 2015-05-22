@@ -71,7 +71,6 @@
 #define PCI_DEVICE_ID_VMWARE_BRIDGE             0x0790
 #define PCI_DEVICE_ID_VMWARE_ROOTPORT           0x07A0
 #define PCI_DEVICE_ID_VMWARE_VMXNET3            0x07B0
-#define PCI_DEVICE_ID_VMWARE_VMXWIFI            0x07B8
 #define PCI_DEVICE_ID_VMWARE_PVSCSI             0x07C0
 #define PCI_DEVICE_ID_VMWARE_82574              0x07D0
 #define PCI_DEVICE_ID_VMWARE_AHCI               0x07E0
@@ -90,6 +89,11 @@
 #define PCI_DEVICE_VMI_REVISION         0x01
 
 #define PCI_DEVICE_ID_VMWARE_DUMMY      0x0809
+
+/*
+ * VMware Virtual Device Test Infrastructure (VDTI) devices
+ */
+#define PCI_DEVICE_ID_VMWARE_VDTI               0x7E57  /* stands for "TEST" */
 
 /* From linux/pci_ids.h:
  *   AMD Lance Ethernet controller
@@ -233,6 +237,9 @@
 
 /************* Test device implementation limits ********************/
 #define MAX_PCI_TEST_DEVICES 16
+
+/************* VDTI PCI Device implementation limits ********************/
+#define MAX_VDTI_PCI_DEVICES 16
 
 /************* USB implementation limits ********************************/
 #define MAX_USB_DEVICES_PER_HOST_CONTROLLER 127

@@ -1,5 +1,5 @@
 /*********************************************************
- * Copyright (C) 2004-2012 VMware, Inc. All rights reserved.
+ * Copyright (C) 2004-2014 VMware, Inc. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License as published by the
@@ -32,6 +32,7 @@
 
 #include "community_source.h"
 #include "x86msr.h"
+#include "vm_basic_defs.h"
 #if defined(USERLEVEL) || defined(MONITOR_APP)
 #include "vm_basic_asm.h"
 #else
@@ -60,53 +61,77 @@
 #define MSR_VMX_VMFUNC                 0x00000491
 #define NUM_VMX_MSRS                   (MSR_VMX_VMFUNC - MSR_VMX_BASIC + 1)
 
-#define MSR_VMX_BASIC_VMCS_ID_SHIFT           0
-#define MSR_VMX_BASIC_VMCS_ID_MASK            0xffffffff
-#define MSR_VMX_BASIC_VMCS_SIZE_SHIFT         32
-#define MSR_VMX_BASIC_VMCS_SIZE_MASK          0x1fff
-#define MSR_VMX_BASIC_MEMTYPE_SHIFT           50
-#define MSR_VMX_BASIC_MEMTYPE_MASK            0xf
-#define MSR_VMX_BASIC_32BITPA                 (1ULL << 48)
-#define MSR_VMX_BASIC_DUALVMM                 (1ULL << 49)
-#define MSR_VMX_BASIC_ADVANCED_IOINFO         (1ULL << 54)
-#define MSR_VMX_BASIC_TRUE_CTLS               (1ULL << 55)
+/*
+ * An alias to accommodate Intel's naming convention in feature masks.
+ */
+#define MSR_VMX_PROCBASED_CTLS2        MSR_VMX_2ND_CTLS
 
-#define MSR_VMX_MISC_TMR_RATIO_SHIFT          0
-#define MSR_VMX_MISC_TMR_RATIO_MASK           0x1f
-#define MSR_VMX_MISC_VMEXIT_SAVES_LMA         (1ULL << 5)
-#define MSR_VMX_MISC_ACTSTATE_HLT             (1ULL << 6)
-#define MSR_VMX_MISC_ACTSTATE_SHUTDOWN        (1ULL << 7)
-#define MSR_VMX_MISC_ACTSTATE_SIPI            (1ULL << 8)
-#define MSR_VMX_MISC_CR3_TARGETS_SHIFT        16
-#define MSR_VMX_MISC_CR3_TARGETS_MASK         0x1ff
-#define MSR_VMX_MISC_MAX_MSRS_SHIFT           25
-#define MSR_VMX_MISC_MAX_MSRS_MASK            0x7
-#define MSR_VMX_MISC_MSEG_ID_SHIFT            32
-#define MSR_VMX_MISC_MSEG_ID_MASK             0xffffffff
-
-#define MSR_VMX_VMCS_ENUM_MAX_INDEX_SHIFT     1
-#define MSR_VMX_VMCS_ENUM_MAX_INDEX_MASK      0x1ff
-
-#define MSR_VMX_EPT_VPID_EPTE_X                 (1ULL << 0)
-#define MSR_VMX_EPT_VPID_GAW_48                 (1ULL << 6)
-#define MSR_VMX_EPT_VPID_ETMT_UC                (1ULL << 8)
-#define MSR_VMX_EPT_VPID_ETMT_WB                (1ULL << 14)
-#define MSR_VMX_EPT_VPID_SP_2MB                 (1ULL << 16)
-#define MSR_VMX_EPT_VPID_SP_1GB                 (1ULL << 17)
-#define MSR_VMX_EPT_VPID_INVEPT                 (1ULL << 20)
-#define MSR_VMX_EPT_ACCESS_DIRTY                (1ULL << 21)
-#define MSR_VMX_EPT_VPID_INVEPT_EPT_CTX         (1ULL << 25)
-#define MSR_VMX_EPT_VPID_INVEPT_GLOBAL          (1ULL << 26)
-#define MSR_VMX_EPT_VPID_INVVPID                (1ULL << 32)
-#define MSR_VMX_EPT_VPID_INVVPID_ADDR           (1ULL << 40)
-#define MSR_VMX_EPT_VPID_INVVPID_VPID_CTX       (1ULL << 41)
-#define MSR_VMX_EPT_VPID_INVVPID_ALL_CTX        (1ULL << 42)
-#define MSR_VMX_EPT_VPID_INVVPID_VPID_CTX_LOCAL (1ULL << 43)
-
-#define VT_VMCS_STANDARD_TAG           0x00000000
 
 /*
- * Structure of VMCS Component Encoding (Table 20-16)
+ * Single bit macros for backwards compatibility.  These can't be
+ * defined as enumeration values using the VMXCAP macro, because
+ * the Microsoft compiler doesn't like 64-bit enumeration values.
+ */
+
+#define MSR_VMX_BASIC_32BITPA                   \
+   (CONST64U(1) << MSR_VMX_BASIC_32BITPA_SHIFT)
+#define MSR_VMX_BASIC_DUALVMM                   \
+   (CONST64U(1) << MSR_VMX_BASIC_DUALVMM_SHIFT)
+#define MSR_VMX_BASIC_ADVANCED_IOINFO           \
+   (CONST64U(1) << MSR_VMX_BASIC_ADVANCED_IOINFO_SHIFT)
+#define MSR_VMX_BASIC_TRUE_CTLS                 \
+   (CONST64U(1) << MSR_VMX_BASIC_TRUE_CTLS_SHIFT)
+                                               
+#define MSR_VMX_MISC_VMEXIT_SAVES_LMA           \
+   (CONST64U(1) << MSR_VMX_MISC_VMEXIT_SAVES_LMA_SHIFT)
+#define MSR_VMX_MISC_ACTSTATE_HLT               \
+   (CONST64U(1) << MSR_VMX_MISC_ACTSTATE_HLT_SHIFT)
+#define MSR_VMX_MISC_ACTSTATE_SHUTDOWN          \
+   (CONST64U(1) << MSR_VMX_MISC_ACTSTATE_SHUTDOWN_SHIFT)
+#define MSR_VMX_MISC_ACTSTATE_SIPI              \
+   (CONST64U(1) << MSR_VMX_MISC_ACTSTATE_SIPI_SHIFT)
+#define MSR_VMX_MISC_RDMSR_SMBASE_IN_SMM        \
+   (CONST64U(1) << MSR_VMX_MISC_RDMSR_SMBASE_IN_SMM_SHIFT)
+#define MSR_VMX_MISC_ALLOW_ALL_VMWRITES         \
+   (CONST64U(1) << MSR_VMX_MISC_ALLOW_ALL_VMWRITES_SHIFT)
+
+
+#define MSR_VMX_EPT_VPID_EPTE_X                 \
+   (CONST64U(1) << MSR_VMX_EPT_VPID_EPTE_X_SHIFT)
+#define MSR_VMX_EPT_VPID_GAW_48                 \
+   (CONST64U(1) << MSR_VMX_EPT_VPID_GAW_48_SHIFT)
+#define MSR_VMX_EPT_VPID_ETMT_UC                \
+   (CONST64U(1) << MSR_VMX_EPT_VPID_ETMT_UC_SHIFT)
+#define MSR_VMX_EPT_VPID_ETMT_WB                \
+   (CONST64U(1) << MSR_VMX_EPT_VPID_ETMT_WB_SHIFT)
+#define MSR_VMX_EPT_VPID_SP_2MB                 \
+   (CONST64U(1) << MSR_VMX_EPT_VPID_SP_2MB_SHIFT)
+#define MSR_VMX_EPT_VPID_SP_1GB                 \
+   (CONST64U(1) << MSR_VMX_EPT_VPID_SP_1GB_SHIFT)
+#define MSR_VMX_EPT_VPID_INVEPT                 \
+   (CONST64U(1) << MSR_VMX_EPT_VPID_INVEPT_SHIFT)
+#define MSR_VMX_EPT_VPID_ACCESS_DIRTY           \
+   (CONST64U(1) << MSR_VMX_EPT_VPID_ACCESS_DIRTY_SHIFT)
+#define MSR_VMX_EPT_VPID_INVEPT_EPT_CTX         \
+   (CONST64U(1) << MSR_VMX_EPT_VPID_INVEPT_EPT_CTX_SHIFT)
+#define MSR_VMX_EPT_VPID_INVEPT_GLOBAL          \
+   (CONST64U(1) << MSR_VMX_EPT_VPID_INVEPT_GLOBAL_SHIFT)
+#define MSR_VMX_EPT_VPID_INVVPID                \
+   (CONST64U(1) << MSR_VMX_EPT_VPID_INVVPID_SHIFT)
+#define MSR_VMX_EPT_VPID_INVVPID_ADDR           \
+   (CONST64U(1) << MSR_VMX_EPT_VPID_INVVPID_ADDR_SHIFT)
+#define MSR_VMX_EPT_VPID_INVVPID_VPID_CTX       \
+   (CONST64U(1) << MSR_VMX_EPT_VPID_INVVPID_VPID_CTX_SHIFT)
+#define MSR_VMX_EPT_VPID_INVVPID_ALL_CTX        \
+   (CONST64U(1) << MSR_VMX_EPT_VPID_INVVPID_ALL_CTX_SHIFT)
+#define MSR_VMX_EPT_VPID_INVVPID_VPID_CTX_LOCAL \
+   (CONST64U(1) << MSR_VMX_EPT_VPID_INVVPID_VPID_CTX_LOCAL_SHIFT)
+
+#define VT_VMCS_STANDARD_TAG           0x00000000
+#define VT_VMCS_SHADOW_TAG             0x80000000
+
+/*
+ * Structure of VMCS Component Encoding.
  */
 #define VT_ENCODING_ACCESS_HIGH        0x00000001
 #define VT_ENCODING_INDEX_MASK         0x000003fe
@@ -114,7 +139,7 @@
 #define VT_ENCODING_TYPE_MASK          0x00000c00
 #define VT_ENCODING_TYPE_SHIFT                 10
 #define VT_ENCODING_TYPE_CTL                    0
-#define VT_ENCODING_TYPE_RODATA                 1
+#define VT_ENCODING_TYPE_VMEXIT_INFO            1
 #define VT_ENCODING_TYPE_GUEST                  2
 #define VT_ENCODING_TYPE_HOST                   3
 #define VT_ENCODING_NUM_TYPES                   4
@@ -127,16 +152,17 @@
 #define VT_ENCODING_NUM_SIZES                   4
 #define VT_ENCODING_RSVD               0xffff9000
 
-/* 
+/*
  * VMCS encodings; volume 3B Appendix H. These are the values passed to
  * VMWrite and VMRead.
  */
 
-/* 16-bit control field: table H-1 */
+/* 16-bit control field. */
 #define VT_VMCS_VPID                   0x00000000
 #define VT_VMCS_PI_NOTIFY              0x00000002
+#define VT_VMCS_EPTP_INDEX             0x00000004
 
-/* 16-bit guest state: table H-2 */
+/* 16-bit guest state. */
 #define VT_VMCS_ES                     0x00000800
 #define VT_VMCS_CS                     0x00000802
 #define VT_VMCS_SS                     0x00000804
@@ -147,7 +173,7 @@
 #define VT_VMCS_TR                     0x0000080E
 #define VT_VMCS_INTR_STATUS            0x00000810
 
-/* 16-bit host state: table H-3 */
+/* 16-bit host state. */
 #define VT_VMCS_HOST_ES                0x00000C00
 #define VT_VMCS_HOST_CS                0x00000C02
 #define VT_VMCS_HOST_SS                0x00000C04
@@ -156,7 +182,7 @@
 #define VT_VMCS_HOST_GS                0x00000C0A
 #define VT_VMCS_HOST_TR                0x00000C0C
 
-/* 64-bit control fields: table H-4 */
+/* 64-bit control fields. */
 #define VT_VMCS_IOBITMAPA              0x00002000
 #define VT_VMCS_IOBITMAPB              0x00002002
 #define VT_VMCS_MSRBITMAP              0x00002004
@@ -175,11 +201,15 @@
 #define VT_VMCS_EOI_EXIT2              0x00002020
 #define VT_VMCS_EOI_EXIT3              0x00002022
 #define VT_VMCS_EPTP_LIST_ADDR         0x00002024
+#define VT_VMCS_VMREAD_BITMAP          0x00002026
+#define VT_VMCS_VMWRITE_BITMAP         0x00002028
+#define VT_VMCS_VE_INFO_ADDR           0x0000202A
+#define VT_VMCS_XSS_EXITING_BITMAP     0x0000202C
 
-/* 64-bit read-only data field: table H-5 */
+/* 64-bit read-only data field. */
 #define VT_VMCS_PHYSADDR               0x00002400
 
-/* 64-bit guest state: table H-6 */
+/* 64-bit guest state. */
 #define VT_VMCS_LINK_PTR               0x00002800
 #define VT_VMCS_DEBUGCTL               0x00002802
 #define VT_VMCS_PAT                    0x00002804
@@ -190,12 +220,12 @@
 #define VT_VMCS_PDPTE2                 0x0000280E
 #define VT_VMCS_PDPTE3                 0x00002810
 
-/* 64-bit host state: table H-7 */
+/* 64-bit host state. */
 #define VT_VMCS_HOST_PAT               0x00002C00
 #define VT_VMCS_HOST_EFER              0x00002C02
 #define VT_VMCS_HOST_PGC               0x00002C04
 
-/* 32-bit control fields: table H-8 */
+/* 32-bit control fields. */
 #define VT_VMCS_PIN_VMEXEC_CTL         0x00004000
 #define VT_VMCS_CPU_VMEXEC_CTL         0x00004002
 #define VT_VMCS_XCP_BITMAP             0x00004004
@@ -215,7 +245,7 @@
 #define VT_VMCS_PAUSE_LOOP_GAP         0x00004020
 #define VT_VMCS_PAUSE_LOOP_WINDOW      0x00004022
 
-/* 32-bit read-only data fields: table H-9 */
+/* 32-bit read-only data fields. */
 #define VT_VMCS_VMINSTR_ERR            0x00004400
 #define VT_VMCS_EXIT_REASON            0x00004402
 #define VT_VMCS_EXIT_INTR_INFO         0x00004404
@@ -225,7 +255,7 @@
 #define VT_VMCS_INSTRLEN               0x0000440C
 #define VT_VMCS_INSTR_INFO             0x0000440E
 
-/* 32-bit guest state: table H-10 */
+/* 32-bit guest state. */
 #define VT_VMCS_ES_LIMIT               0x00004800
 #define VT_VMCS_CS_LIMIT               0x00004802
 #define VT_VMCS_SS_LIMIT               0x00004804
@@ -250,10 +280,10 @@
 #define VT_VMCS_SYSENTER_CS            0x0000482A
 #define VT_VMCS_TIMER                  0x0000482E
 
-/* 32-bit host state: table H-11 */
+/* 32-bit host state. */
 #define VT_VMCS_HOST_SYSENTER_CS       0x00004C00
 
-/* natural-width control fields: table H-12 */
+/* natural-width control fields. */
 #define VT_VMCS_CR0_GHMASK             0x00006000
 #define VT_VMCS_CR4_GHMASK             0x00006002
 #define VT_VMCS_CR0_SHADOW             0x00006004
@@ -263,7 +293,7 @@
 #define VT_VMCS_CR3_TARGVAL2           0x0000600C
 #define VT_VMCS_CR3_TARGVAL3           0x0000600E
 
-/* natural-width read-only data fields: table H-13 */
+/* natural-width read-only data fields. */
 #define VT_VMCS_EXIT_QUAL              0x00006400
 #define VT_VMCS_IO_ECX                 0x00006402
 #define VT_VMCS_IO_ESI                 0x00006404
@@ -271,7 +301,7 @@
 #define VT_VMCS_IO_EIP                 0x00006408
 #define VT_VMCS_LINEAR_ADDR            0x0000640A
 
-/* natural-width guest state: table H-14 */
+/* natural-width guest state. */
 #define VT_VMCS_CR0                    0x00006800
 #define VT_VMCS_CR3                    0x00006802
 #define VT_VMCS_CR4                    0x00006804
@@ -293,7 +323,7 @@
 #define VT_VMCS_SYSENTER_ESP           0x00006824
 #define VT_VMCS_SYSENTER_EIP           0x00006826
 
-/* natural-width host state: table H-15 */
+/* natural-width host state. */
 #define VT_VMCS_HOST_CR0               0x00006C00
 #define VT_VMCS_HOST_CR3               0x00006C02
 #define VT_VMCS_HOST_CR4               0x00006C04
@@ -314,81 +344,347 @@
 #define VT_VMCS_MSR_BITMAP_SIZE   (1 * PAGE_SIZE)
 
 /*
- * Bits for execution control
+ * Execution control bit capabilities come in pairs: a "required" bit in
+ * the low dword, and an "allowed" bit in the high dword.
  */
-#define VT_VMCS_PIN_VMEXEC_CTL_EXTINT_EXIT  0x00000001
-#define VT_VMCS_PIN_VMEXEC_CTL_NMI_EXIT     0x00000008
-#define VT_VMCS_PIN_VMEXEC_CTL_VNMI         0x00000020
-#define VT_VMCS_PIN_VMEXEC_CTL_TIMER        0x00000040
-#define VT_VMCS_PIN_VMEXEC_CTL_POSTED_INTR  0x00000080
-
-#define VT_VMCS_CPU_VMEXEC_CTL_VINTR_WINDOW 0x00000004
-#define VT_VMCS_CPU_VMEXEC_CTL_TSCOFF       0x00000008
-#define VT_VMCS_CPU_VMEXEC_CTL_HLT          0x00000080
-#define VT_VMCS_CPU_VMEXEC_CTL_INVLPG       0x00000200
-#define VT_VMCS_CPU_VMEXEC_CTL_MWAIT        0x00000400
-#define VT_VMCS_CPU_VMEXEC_CTL_RDPMC        0x00000800
-#define VT_VMCS_CPU_VMEXEC_CTL_RDTSC        0x00001000
-#define VT_VMCS_CPU_VMEXEC_CTL_LDCR3        0x00008000
-#define VT_VMCS_CPU_VMEXEC_CTL_STCR3        0x00010000
-#define VT_VMCS_CPU_VMEXEC_CTL_LDCR8        0x00080000
-#define VT_VMCS_CPU_VMEXEC_CTL_STCR8        0x00100000
-#define VT_VMCS_CPU_VMEXEC_CTL_TPR_SHADOW   0x00200000
-#define VT_VMCS_CPU_VMEXEC_CTL_VNMI_WINDOW  0x00400000
-#define VT_VMCS_CPU_VMEXEC_CTL_MOVDR        0x00800000
-#define VT_VMCS_CPU_VMEXEC_CTL_IO           0x01000000
-#define VT_VMCS_CPU_VMEXEC_CTL_IOBITMAP     0x02000000
-#define VT_VMCS_CPU_VMEXEC_CTL_MTF          0x08000000
-#define VT_VMCS_CPU_VMEXEC_CTL_MSRBITMAP    0x10000000
-#define VT_VMCS_CPU_VMEXEC_CTL_MONITOR      0x20000000
-#define VT_VMCS_CPU_VMEXEC_CTL_PAUSE        0x40000000
-#define VT_VMCS_CPU_VMEXEC_CTL_USE_2ND      0x80000000
-
-#define VT_VMCS_2ND_VMEXEC_CTL_APIC         0x00000001
-#define VT_VMCS_2ND_VMEXEC_CTL_EPT          0x00000002
-#define VT_VMCS_2ND_VMEXEC_CTL_DT           0x00000004
-#define VT_VMCS_2ND_VMEXEC_CTL_RDTSCP       0x00000008
-#define VT_VMCS_2ND_VMEXEC_CTL_X2APIC       0x00000010
-#define VT_VMCS_2ND_VMEXEC_CTL_VPID         0x00000020
-#define VT_VMCS_2ND_VMEXEC_CTL_WBINVD       0x00000040
-#define VT_VMCS_2ND_VMEXEC_CTL_UNRESTRICTED 0x00000080
-#define VT_VMCS_2ND_VMEXEC_CTL_APICREG      0x00000100
-#define VT_VMCS_2ND_VMEXEC_CTL_VINTR        0x00000200
-#define VT_VMCS_2ND_VMEXEC_CTL_PAUSE_LOOP   0x00000400
-#define VT_VMCS_2ND_VMEXEC_CTL_RDRAND       0x00000800
-#define VT_VMCS_2ND_VMEXEC_CTL_INVPCID      0x00001000
-#define VT_VMCS_2ND_VMEXEC_CTL_VMFUNC       0x00002000
+#define VMXCTL(_msrName, _field, _pos)                   \
+   VMXREQUIRE(_msrName, _field, _pos,        1)          \
+     VMXALLOW(_msrName, _field, (_pos) + 32, 1)
 
 /*
- * Bits for entry control.
+ * VMX-fixed bit MSRs come in pairs: allowed to be zero and allowed to
+ * be one.  Each has its own capability bits, but the field names and bit
+ * positions are the same.
  */
-#define VT_VMCS_VMENTRY_CTL_LOAD_DEBUGCTL     0x00000004
-#define VT_VMCS_VMENTRY_CTL_LONGMODE          0x00000200
-#define VT_VMCS_VMENTRY_CTL_ENTRY_TO_SMM      0x00000400
-#define VT_VMCS_VMENTRY_CTL_SMM_TEARDOWN      0x00000800
-#define VT_VMCS_VMENTRY_CTL_LOAD_PGC          0x00002000
-#define VT_VMCS_VMENTRY_CTL_LOAD_PAT          0x00004000
-#define VT_VMCS_VMENTRY_CTL_LOAD_EFER         0x00008000
+#define VMXFIXED(_msrName, _field, _pos)                 \
+   VMXCAP(_msrName ## 0, _field, _pos, 1)                \
+   VMXCAP(_msrName ## 1, _field, _pos, 1)
 
 /*
- * Bits for exit control.
+ * Basic VMX Information
  */
-#define VT_VMCS_VMEXIT_CTL_SAVE_DEBUGCTL     0x00000004
-#define VT_VMCS_VMEXIT_CTL_LONGMODE          0x00000200
-#define VT_VMCS_VMEXIT_CTL_LOAD_PGC          0x00001000
-#define VT_VMCS_VMEXIT_CTL_INTRACK           0x00008000
-#define VT_VMCS_VMEXIT_CTL_SAVE_PAT          0x00040000
-#define VT_VMCS_VMEXIT_CTL_LOAD_PAT          0x00080000
-#define VT_VMCS_VMEXIT_CTL_SAVE_EFER         0x00100000
-#define VT_VMCS_VMEXIT_CTL_LOAD_EFER         0x00200000
-#define VT_VMCS_VMEXIT_CTL_SAVE_TIMER        0x00400000
+#define VMX_BASIC(_field, _pos, _len)                    \
+   VMXCAP(_BASIC, _field, _pos, _len)
+#define VMX_BASIC_CAP_NDA
+#define VMX_BASIC_CAP_PUB                                \
+   VMX_BASIC(VMCS_ID,               0, 32)               \
+   VMX_BASIC(VMCS_SIZE,            32, 13)               \
+   VMX_BASIC(32BITPA,              48,  1)               \
+   VMX_BASIC(DUALVMM,              49,  1)               \
+   VMX_BASIC(MEMTYPE,              50,  4)               \
+   VMX_BASIC(ADVANCED_IOINFO,      54,  1)               \
+   VMX_BASIC(TRUE_CTLS,            55,  1)
 
+#define VMX_BASIC_CAP                                    \
+        VMX_BASIC_CAP_NDA                                \
+        VMX_BASIC_CAP_PUB
+
+/*
+ * Pin-Based VM-Execution Controls
+ */
+#define VMX_PIN(_field, _pos)                            \
+   VMXCTL(_PINBASED_CTLS, _field, _pos)
+#define VMX_PINBASED_CTLS_CAP_NDA
+
+#define VMX_PINBASED_CTLS_CAP_PUB                        \
+   VMX_PIN(EXTINT_EXIT,          0)                      \
+   VMX_PIN(NMI_EXIT,             3)                      \
+   VMX_PIN(VNMI,                 5)                      \
+   VMX_PIN(TIMER,                6)                      \
+   VMX_PIN(POSTED_INTR,          7)
+
+#define VMX_PINBASED_CTLS_CAP                            \
+        VMX_PINBASED_CTLS_CAP_NDA                        \
+        VMX_PINBASED_CTLS_CAP_PUB
+
+/*
+ * Primary Processor-Based VM-Execution Controls
+ */
+#define VMX_CPU(_field, _pos)                            \
+   VMXCTL(_PROCBASED_CTLS, _field, _pos)
+#define VMX_PROCBASED_CTLS_CAP_NDA
+
+#define VMX_PROCBASED_CTLS_CAP_PUB                       \
+   VMX_CPU(VINTR_WINDOW,         2)                      \
+   VMX_CPU(TSCOFF,               3)                      \
+   VMX_CPU(HLT,                  7)                      \
+   VMX_CPU(INVLPG,               9)                      \
+   VMX_CPU(MWAIT,               10)                      \
+   VMX_CPU(RDPMC,               11)                      \
+   VMX_CPU(RDTSC,               12)                      \
+   VMX_CPU(LDCR3,               15)                      \
+   VMX_CPU(STCR3,               16)                      \
+   VMX_CPU(LDCR8,               19)                      \
+   VMX_CPU(STCR8,               20)                      \
+   VMX_CPU(TPR_SHADOW,          21)                      \
+   VMX_CPU(VNMI_WINDOW,         22)                      \
+   VMX_CPU(MOVDR,               23)                      \
+   VMX_CPU(IO,                  24)                      \
+   VMX_CPU(IOBITMAP,            25)                      \
+   VMX_CPU(MTF,                 27)                      \
+   VMX_CPU(MSRBITMAP,           28)                      \
+   VMX_CPU(MONITOR,             29)                      \
+   VMX_CPU(PAUSE,               30)                      \
+   VMX_CPU(USE_2ND,             31)
+
+#define VMX_PROCBASED_CTLS_CAP                           \
+        VMX_PROCBASED_CTLS_CAP_NDA                       \
+        VMX_PROCBASED_CTLS_CAP_PUB
+
+/*
+ * Secondary Processor-Based VM-Execution Controls
+ */
+#define VMX_CPU2(_field, _pos)                           \
+   VMXCTL(_PROCBASED_CTLS2, _field, _pos)
+#define VMX_PROCBASED_CTLS2_CAP_NDA
+#define VMX_PROCBASED_CTLS2_CAP_PUB                      \
+   VMX_CPU2(APIC,                0)                      \
+   VMX_CPU2(EPT,                 1)                      \
+   VMX_CPU2(DT,                  2)                      \
+   VMX_CPU2(RDTSCP,              3)                      \
+   VMX_CPU2(X2APIC,              4)                      \
+   VMX_CPU2(VPID,                5)                      \
+   VMX_CPU2(WBINVD,              6)                      \
+   VMX_CPU2(UNRESTRICTED,        7)                      \
+   VMX_CPU2(APICREG,             8)                      \
+   VMX_CPU2(VINTR,               9)                      \
+   VMX_CPU2(PAUSE_LOOP,         10)                      \
+   VMX_CPU2(RDRAND,             11)                      \
+   VMX_CPU2(INVPCID,            12)                      \
+   VMX_CPU2(VMFUNC,             13)                      \
+   VMX_CPU2(VMCS_SHADOW,        14)                      \
+   VMX_CPU2(RDSEED,             16)                      \
+   VMX_CPU2(EPT_VIOL_VE,        18)                      \
+   VMX_CPU2(XSAVES,             20)
+
+#define VMX_PROCBASED_CTLS2_CAP                          \
+        VMX_PROCBASED_CTLS2_CAP_NDA                      \
+        VMX_PROCBASED_CTLS2_CAP_PUB
+
+/*
+ * VM-Exit Controls
+ */
+#define VMX_EXIT(_field, _pos)                           \
+   VMXCTL(_EXIT_CTLS, _field, _pos)
+#define VMX_EXIT_CTLS_CAP_NDA
+#define VMX_EXIT_CTLS_CAP_PUB                            \
+   VMX_EXIT(SAVE_DEBUGCTL,       2)                      \
+   VMX_EXIT(LONGMODE,            9)                      \
+   VMX_EXIT(LOAD_PGC,           12)                      \
+   VMX_EXIT(INTRACK,            15)                      \
+   VMX_EXIT(SAVE_PAT,           18)                      \
+   VMX_EXIT(LOAD_PAT,           19)                      \
+   VMX_EXIT(SAVE_EFER,          20)                      \
+   VMX_EXIT(LOAD_EFER,          21)                      \
+   VMX_EXIT(SAVE_TIMER,         22)
+
+#define VMX_EXIT_CTLS_CAP                                \
+        VMX_EXIT_CTLS_CAP_NDA                            \
+        VMX_EXIT_CTLS_CAP_PUB
+
+/*
+ * VM-Entry Controls
+ */
+#define VMX_ENTRY(_field, _pos)                          \
+   VMXCTL(_ENTRY_CTLS, _field, _pos)
+#define VMX_ENTRY_CTLS_CAP_NDA
+#define VMX_ENTRY_CTLS_CAP_PUB                           \
+   VMX_ENTRY(LOAD_DEBUGCTL,      2)                      \
+   VMX_ENTRY(LONGMODE,           9)                      \
+   VMX_ENTRY(ENTRY_TO_SMM,      10)                      \
+   VMX_ENTRY(SMM_TEARDOWN,      11)                      \
+   VMX_ENTRY(LOAD_PGC,          13)                      \
+   VMX_ENTRY(LOAD_PAT,          14)                      \
+   VMX_ENTRY(LOAD_EFER,         15)
+
+#define VMX_ENTRY_CTLS_CAP                               \
+        VMX_ENTRY_CTLS_CAP_NDA                           \
+        VMX_ENTRY_CTLS_CAP_PUB
+
+/*
+ * Miscellaneoous Data
+ */
+#define VMX_MISC(_field, _pos, _len)                     \
+   VMXCAP(_MISC, _field, _pos, _len)
+#define VMX_MISC_CAP_NDA
+#define VMX_MISC_CAP_PUB                                 \
+   VMX_MISC(TMR_RATIO,              0,  5)               \
+   VMX_MISC(VMEXIT_SAVES_LMA,       5,  1)               \
+   VMX_MISC(ACTSTATE_HLT,           6,  1)               \
+   VMX_MISC(ACTSTATE_SHUTDOWN,      7,  1)               \
+   VMX_MISC(ACTSTATE_SIPI,          8,  1)               \
+   VMX_MISC(RDMSR_SMBASE_IN_SMM,   15,  1)               \
+   VMX_MISC(CR3_TARGETS,           16,  9)               \
+   VMX_MISC(MAX_MSRS,              25,  3)               \
+   VMX_MISC(ALLOW_ALL_VMWRITES,    29,  1)               \
+   VMX_MISC(MSEG_ID,               32, 32)               \
+
+#define VMX_MISC_CAP                                     \
+        VMX_MISC_CAP_NDA                                 \
+        VMX_MISC_CAP_PUB
+
+/*
+ * VMX-Fixed Bits in CR0
+ */
+#define VMX_FIXED_CR0(_field, _pos)                      \
+   VMXFIXED(_CR0_FIXED, _field, _pos)
+#define VMX_FIXED_CR0_CAP_NDA
+#define VMX_FIXED_CR0_CAP_PUB                            \
+   VMX_FIXED_CR0(PE,          0)                         \
+   VMX_FIXED_CR0(MP,          1)                         \
+   VMX_FIXED_CR0(EM,          2)                         \
+   VMX_FIXED_CR0(TS,          3)                         \
+   VMX_FIXED_CR0(ET,          4)                         \
+   VMX_FIXED_CR0(NE,          5)                         \
+   VMX_FIXED_CR0(WP,         16)                         \
+   VMX_FIXED_CR0(AM,         18)                         \
+   VMX_FIXED_CR0(NW,         29)                         \
+   VMX_FIXED_CR0(CD,         30)                         \
+   VMX_FIXED_CR0(PG,         31)
+
+#define VMX_FIXED_CR0_CAP                                \
+        VMX_FIXED_CR0_CAP_NDA                            \
+        VMX_FIXED_CR0_CAP_PUB
+
+/*
+ * VMX-Fixed Bits in CR4
+ */
+#define VMX_FIXED_CR4(_field, _pos)                      \
+   VMXFIXED(_CR4_FIXED, _field, _pos)
+#define VMX_FIXED_CR4_CAP_NDA
+#define VMX_FIXED_CR4_CAP_PUB                            \
+   VMX_FIXED_CR4(VME,         0)                         \
+   VMX_FIXED_CR4(PVI,         1)                         \
+   VMX_FIXED_CR4(TSD,         2)                         \
+   VMX_FIXED_CR4(DE,          3)                         \
+   VMX_FIXED_CR4(PSE,         4)                         \
+   VMX_FIXED_CR4(PAE,         5)                         \
+   VMX_FIXED_CR4(MCE,         6)                         \
+   VMX_FIXED_CR4(PGE,         7)                         \
+   VMX_FIXED_CR4(PCE,         8)                         \
+   VMX_FIXED_CR4(OSFXSR,      9)                         \
+   VMX_FIXED_CR4(OSXMMEXCPT, 10)                         \
+   VMX_FIXED_CR4(VMXE,       13)                         \
+   VMX_FIXED_CR4(SMXE,       14)                         \
+   VMX_FIXED_CR4(FSGSBASE,   16)                         \
+   VMX_FIXED_CR4(PCIDE,      17)                         \
+   VMX_FIXED_CR4(OSXSAVE,    18)                         \
+   VMX_FIXED_CR4(SMEP,       20)                         \
+   VMX_FIXED_CR4(SMAP,       21)
+
+#define VMX_FIXED_CR4_CAP                                \
+        VMX_FIXED_CR4_CAP_NDA                            \
+        VMX_FIXED_CR4_CAP_PUB
+
+/*
+ * VMCS Enumeration
+ */
+#define VMX_VMCS_ENUM_CAP_NDA
+#define VMX_VMCS_ENUM_CAP_PUB                           \
+   VMXCAP(_VMCS_ENUM, MAX_INDEX,    1,  9)
+
+#define VMX_VMCS_ENUM_CAP                               \
+        VMX_VMCS_ENUM_CAP_NDA                           \
+        VMX_VMCS_ENUM_CAP_PUB
+
+/*
+ * VPID and EPT Capabilities
+ */
+#define VMX_EPT(_field, _pos, _len)                     \
+   VMXCAP(_EPT_VPID, _field, _pos, _len)
+#define VMX_EPT_VPID_CAP_NDA
+#define VMX_EPT_VPID_CAP_PUB                            \
+   VMX_EPT(EPTE_X,                  0,  1)              \
+   VMX_EPT(GAW_48,                  6,  1)              \
+   VMX_EPT(ETMT_UC,                 8,  1)              \
+   VMX_EPT(ETMT_WB,                14,  1)              \
+   VMX_EPT(SP_2MB,                 16,  1)              \
+   VMX_EPT(SP_1GB,                 17,  1)              \
+   VMX_EPT(INVEPT,                 20,  1)              \
+   VMX_EPT(ACCESS_DIRTY,           21,  1)              \
+   VMX_EPT(INVEPT_EPT_CTX,         25,  1)              \
+   VMX_EPT(INVEPT_GLOBAL,          26,  1)              \
+   VMX_EPT(INVVPID,                32,  1)              \
+   VMX_EPT(INVVPID_ADDR,           40,  1)              \
+   VMX_EPT(INVVPID_VPID_CTX,       41,  1)              \
+   VMX_EPT(INVVPID_ALL_CTX,        42,  1)              \
+   VMX_EPT(INVVPID_VPID_CTX_LOCAL, 43,  1)
+
+#define VMX_EPT_VPID_CAP                                \
+        VMX_EPT_VPID_CAP_NDA                            \
+        VMX_EPT_VPID_CAP_PUB
+
+/*
+ * VM Functions
+ */
+#define VMX_VMFUNC_CAP_NDA
+#define VMX_VMFUNC_CAP_PUB                              \
+   VMXCAP(_VMFUNC, EPTP_SWITCHING,  0,  1)
+
+#define VMX_VMFUNC_CAP     \
+        VMX_VMFUNC_CAP_NDA \
+        VMX_VMFUNC_CAP_PUB
+
+
+
+
+/*
+ * Match the historical names for these fields:
+ * <field>_SHIFT is the lsb of the field.
+ * <field>_MASK is an unshifted bit-mask the width of the field.
+ * <field> is the bit-mask shifted into the field's position in the MSR.
+ */
+enum {
+#define VMXCAP(_msrName, _field, _pos, _len)                              \
+   MSR_VMX ## _msrName ## _ ## _field ## _SHIFT = (_pos),                 \
+   MSR_VMX ## _msrName ## _ ## _field ## _MASK  = (int)MASK64(_len),      \
+
+   VMX_BASIC_CAP
+   VMX_MISC_CAP
+   VMX_VMCS_ENUM_CAP
+   VMX_EPT_VPID_CAP
+
+#undef VMXCAP
+};
+
+/*
+ * Convert capabilities into VMCS control bit names.
+ */
+enum {
+#define _PINBASED_CTLS        VT_VMCS_PIN_VMEXEC_CTL_
+#define _PROCBASED_CTLS       VT_VMCS_CPU_VMEXEC_CTL_
+#define _PROCBASED_CTLS2      VT_VMCS_2ND_VMEXEC_CTL_
+#define _EXIT_CTLS            VT_VMCS_VMEXIT_CTL_
+#define _ENTRY_CTLS           VT_VMCS_VMENTRY_CTL_
+
+#define VMXREQUIRE(_msrName, _field, _pos, _len)                      \
+        VMXCAP(_msrName, _field, _pos, _len)
+#define VMXALLOW(_msrName, _field, _pos, _len)
+#define VMXCAP(_msrName, _field, _pos, _len)                          \
+   CONC(_msrName, _field) = 1ULL << (_pos),
+
+   VMX_PINBASED_CTLS_CAP
+   VMX_PROCBASED_CTLS_CAP
+   VMX_EXIT_CTLS_CAP
+   VMX_ENTRY_CTLS_CAP
+   VMX_PROCBASED_CTLS2_CAP
+
+#undef VMXCAP
+#undef VMXALLOW
+#undef VMXREQUIRE
+
+#undef _ENTRY_CTLS
+#undef _EXIT_CTLS
+#undef _PROCBASED_CTLS2
+#undef _PROCBASED_CTLS
+#undef _PINBASED_CTLS
+};
 
 /*
  * The AR format is mostly the same as the SMM segment format; i.e.,
  * a descriptor shifted by a byte. However, there is an extra bit in
  * the high-order word which indicates an "unusable" selector.  A NULL
- * selector is generally unusable, as are a few other corner cases.  
+ * selector is generally unusable, as are a few other corner cases.
  */
 #define VT_VMCS_AR_UNUSABLE   0x00010000
 #define VT_VMCS_AR_RESERVED   0xfffe0f00
@@ -405,12 +701,13 @@
 #define VT_VMCS_PENDDBG_B3         0x00000008
 #define VT_VMCS_PENDDBG_BE         0x00001000
 #define VT_VMCS_PENDDBG_BS         0x00004000
-#define VT_VMCS_PENDDBG_MBZ        0xffffaff0
+#define VT_VMCS_PENDDBG_RTM        0x00010000
+#define VT_VMCS_PENDDBG_MBZ        0xfffeaff0
 
 /* Exception error must-be-zero bits for VMEntry */
 #define VT_XCP_ERR_MBZ             0xffff8000
 
-/* Exit reasons: table I-1 */
+/* Exit reasons. */
 #define VT_EXITREASON_EXC_OR_NMI            0
 #define VT_EXITREASON_EXTINT                1
 #define VT_EXITREASON_TRIPLEFAULT           2
@@ -468,6 +765,9 @@
 #define VT_EXITREASON_RDRAND               57
 #define VT_EXITREASON_INVPCID              58
 #define VT_EXITREASON_VMFUNC               59
+#define VT_EXITREASON_RDSEED               61
+#define VT_EXITREASON_XSAVES               63
+#define VT_EXITREASON_XRSTORS              64
 
 /*
  * VT synthesized exit reasons:
@@ -477,22 +777,23 @@
  * VT_VMCS_EXIT_INTR_INFO to extract the TYPE_MASK and VECTOR_MASK.
  * See HVExitGlue.
  *
- * ASSERT_ON_COMPILEs to ensure that these codes don't overlap
- * real codes in hardware can be found in HVExitGlue.
+ * We shouldn't have to worry about new hardware introducing conflicting
+ * exit reasons, because we shouldn't encounter any new exit reasons
+ * unless we opt-in to the features that produce them.
  */
-#define VT_EXITREASON_SYNTH_BASE     61
-#define VT_EXITREASON_SYNTH_IRET     61
-#define VT_EXITREASON_SYNTH_NMI      62
-#define VT_EXITREASON_SYNTH_ICEBP    63
-#define VT_EXITREASON_SYNTH_EXC_BASE 64
-#define VT_EXITREASON_SYNTH_MAX      95
+#define VT_EXITREASON_SYNTH_BASE     77
+#define VT_EXITREASON_SYNTH_IRET     77
+#define VT_EXITREASON_SYNTH_NMI      78
+#define VT_EXITREASON_SYNTH_ICEBP    79
+#define VT_EXITREASON_SYNTH_EXC_BASE 80
+#define VT_EXITREASON_SYNTH_MAX      111
 
 #define VT_EXITREASON_SYNTH_EXC(gatenum) \
         (VT_EXITREASON_SYNTH_EXC_BASE + gatenum) /* 0-31 */
 
 #define VT_EXITREASON_VMENTRYFAIL   (1U << 31)
 
-/* Instruction error codes:  table 5-1 (volume 2) */
+/* Instruction error codes. */
 #define VT_ERROR_VMCALL_VMX_ROOT            1
 #define VT_ERROR_VMCLEAR_INVALID_PA         2
 #define VT_ERROR_VMCLEAR_ROOT_PTR           3
@@ -708,7 +1009,7 @@ VTEncodingSize(uint32 encoding)
 /*
  *----------------------------------------------------------------------
  * VTComputeMandatoryBits --
- * 
+ *
  *   Compute the mandatory bits for a VMCS field, based on the allowed
  *   ones and allowed zeros as reported in the appropriate VMX MSR, and
  *   the desired bits.
@@ -718,7 +1019,7 @@ static INLINE uint32
 VTComputeMandatoryBits(uint64 msrVal, uint32 bits)
 {
    uint32 ones = LODWORD(msrVal);
-   uint32 zeros = HIDWORD(msrVal); 
+   uint32 zeros = HIDWORD(msrVal);
    return (bits | ones) & zeros;
 }
 
@@ -726,7 +1027,7 @@ VTComputeMandatoryBits(uint64 msrVal, uint32 bits)
  *----------------------------------------------------------------------
  *
  * VT_EnabledFromFeatures --
- * 
+ *
  *  Returns TRUE if VT is enabled in the given feature control bits.
  *
  *----------------------------------------------------------------------
@@ -742,7 +1043,7 @@ VT_EnabledFromFeatures(uint64 featCtl)
  *----------------------------------------------------------------------
  *
  * VT_LockedFromFeatures --
- * 
+ *
  *  Returns TRUE if VT is locked in the given feature control bits.
  *
  *----------------------------------------------------------------------
@@ -757,10 +1058,10 @@ VT_LockedFromFeatures(uint64 featCtl)
  *----------------------------------------------------------------------
  *
  * VT_SupportedFromFeatures --
- * 
+ *
  *   Returns TRUE if the given VMX features are compatible with our VT
  *   monitor.
- *   
+ *
  *----------------------------------------------------------------------
  */
 static INLINE Bool
@@ -796,7 +1097,7 @@ VT_SupportedFromFeatures(uint64 pinBasedCtl, uint64 procBasedCtl,
  *
  * VT_RealModeSupportedFromFeatures --
  *
- *   Returns TRUE if the given VMX features provide real-address 
+ *   Returns TRUE if the given VMX features provide real-address
  *   mode guest support.
  *
  *   Assumes that VT is supported.
@@ -815,7 +1116,7 @@ VT_RealModeSupportedFromFeatures(uint64 secondary)
  *----------------------------------------------------------------------
  *
  * VT_EnabledCPU --
- * 
+ *
  *   Returns TRUE if VT is enabled on this CPU.  This function assumes
  *   that the processor is VT_Capable().
  *
@@ -833,7 +1134,7 @@ VT_EnabledCPU(void)
  *
  * VT_SupportedCPU --
  *
- *   Returns TRUE if this CPU has all of the features that we need to 
+ *   Returns TRUE if this CPU has all of the features that we need to
  *   run our VT monitor.  This function assumes that the processor is
  *   VT_Capable().
  *
@@ -866,7 +1167,7 @@ VT_SupportedCPU(void)
 /*
  *----------------------------------------------------------------------
  * VT_CapableCPU --
- * 
+ *
  *   Verify that this CPU is VT-capable.
  *----------------------------------------------------------------------
  */

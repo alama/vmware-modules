@@ -1,5 +1,5 @@
 /*********************************************************
- * Copyright (C) 2005-2011 VMware, Inc. All rights reserved.
+ * Copyright (C) 2005,2006,2008,2009,2011,2013 VMware, Inc. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License as published by the
@@ -33,9 +33,8 @@
 
 #include "x86desc.h"
 
-typedef 
-#include "vmware_pack_begin.h"
-struct Context64 {
+#pragma pack(push, 1)
+typedef struct Context64 {
    uint64 cr3;
    uint64 rax;
    uint64 rcx;
@@ -63,20 +62,17 @@ struct Context64 {
    uint64 eflags;
    uint16 ldt;
    uint16 _pad[3];
-} 
-#include "vmware_pack_end.h"
-Context64;
+} Context64;
+#pragma pack(pop)
 
-typedef
-#include "vmware_pack_begin.h"
-struct ContextInfo64 {
+#pragma pack(push, 1)
+typedef struct ContextInfo64 {
    DTRWords64 gdtr;
    DTRWords64 idtr;
    Context64  context;
    uint16     tr;
    uint16     _pad0;
-} 
-#include "vmware_pack_end.h"
-ContextInfo64;
+} ContextInfo64;
+#pragma pack(pop)
 
 #endif

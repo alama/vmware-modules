@@ -1,5 +1,5 @@
 /*********************************************************
- * Copyright (C) 1998 VMware, Inc. All rights reserved.
+ * Copyright (C) 1998-2014 VMware, Inc. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License as published by the
@@ -51,7 +51,6 @@
 #include "vmx86.h"
 #include "initblock.h"
 #include "task.h"
-#include "speaker_reg.h"
 #include "memtrack.h"
 #include "task.h"
 #include "cpuid.h"
@@ -167,7 +166,6 @@ VMX86_RegisterMonitor(int value)  // IN:
    return 1291;
 }
 
-#ifdef VM_X86_64
 #ifndef HAVE_COMPAT_IOCTL
 static int
 LinuxDriver_Ioctl32_Handler(unsigned int fd,
@@ -224,10 +222,6 @@ unregister_ioctl32_handlers(void)
    }
 #endif /* !HAVE_COMPAT_IOCTL */
 }
-#else /* VM_X86_64 */
-#define register_ioctl32_handlers() (0)
-#define unregister_ioctl32_handlers() do { } while (0)
-#endif /* VM_X86_64 */
 
 
 /*
@@ -1013,14 +1007,10 @@ static int LinuxDriverAllocContig(VMLinux *vmLinux,
    }
    switch (VMMON_MAP_MT(off)) {
       case VMMON_MAP_MT_LOW4GB:
-#ifdef VM_X86_64
-#   ifdef GFP_DMA32
+#ifdef GFP_DMA32
          gfpFlag = GFP_USER | GFP_DMA32;
-#   else
-         gfpFlag = GFP_USER | GFP_DMA;
-#   endif
 #else
-         gfpFlag = GFP_USER;
+         gfpFlag = GFP_USER | GFP_DMA;
 #endif
          break;
       case VMMON_MAP_MT_LOW16MB:
@@ -1411,7 +1401,7 @@ LinuxDriver_Ioctl(struct inode *inode,  // IN:
    case IOCTL_VMX86_INIT_CROSSGDT:
    case IOCTL_VMX86_SET_UID:
    case IOCTL_VMX86_LOOK_UP_MPN:
-#if defined(__linux__) && defined(VMX86_DEVEL) && defined(VM_X86_64)
+#if defined(__linux__) && defined(VMX86_DEVEL)
    case IOCTL_VMX86_LOOK_UP_LARGE_MPN:
 #endif
    case IOCTL_VMX86_GET_NUM_VMS:
@@ -1419,8 +1409,6 @@ LinuxDriver_Ioctl(struct inode *inode,  // IN:
    case IOCTL_VMX86_SET_HARD_LIMIT:
    case IOCTL_VMX86_PAE_ENABLED:
    case IOCTL_VMX86_VMX_ENABLED:
-   case IOCTL_VMX86_ENABLE_HV:
-   case IOCTL_VMX86_HOST_X86_64:
    case IOCTL_VMX86_GET_IPI_VECTORS:
    case IOCTL_VMX86_GET_KHZ_ESTIMATE:
    case IOCTL_VMX86_GET_ALL_CPUID:
@@ -1598,7 +1586,7 @@ LinuxDriver_Ioctl(struct inode *inode,  // IN:
       break;
    }
 
-#if defined(__linux__) && defined(VMX86_DEVEL) && defined(VM_X86_64)
+#if defined(__linux__) && defined(VMX86_DEVEL)
   case IOCTL_VMX86_LOOK_UP_LARGE_MPN: {
       VMLockPage args;
 
@@ -1717,18 +1705,6 @@ LinuxDriver_Ioctl(struct inode *inode,  // IN:
       retval = Vmx86_VMXEnabled();
       break;
 
-   case IOCTL_VMX86_ENABLE_HV:
-      Vmx86_EnableHV();
-      break;
-
-   case IOCTL_VMX86_HOST_X86_64:
-#ifdef VM_X86_64
-      retval = TRUE;
-#else
-      retval = FALSE;
-#endif
-      break;
-
    case IOCTL_VMX86_APIC_INIT: {
       VMAPICInfo info;
       Bool setVMPtr;
@@ -1763,7 +1739,7 @@ LinuxDriver_Ioctl(struct inode *inode,  // IN:
                                    sizeof ipiTargets);
 
       if (retval == 0) {
-         HostIF_IPI(vm, ipiTargets, TRUE);
+         HostIF_IPI(vm, &ipiTargets, TRUE);
       }
 
       break;
@@ -1779,6 +1755,7 @@ LinuxDriver_Ioctl(struct inode *inode,  // IN:
       ipiVectors.hostIPIVectors[1] = 0;
 #endif
       ipiVectors.monitorIPIVector = monitorIPIVector;
+      ipiVectors.hvIPIVector      = hvIPIVector;
 
       retval = HostIF_CopyToUser((void *)ioarg, &ipiVectors,
                                   sizeof ipiVectors);
@@ -1896,11 +1873,11 @@ LinuxDriver_Ioctl(struct inode *inode,  // IN:
            break;
          }
          if (iocmd == IOCTL_VMX86_ALLOC_LOCKED_PAGES) {
-            retval = Vmx86_AllocLockedPages(vm, req.mpn32List,
+            retval = Vmx86_AllocLockedPages(vm, req.mpn64List,
                                             req.mpnCount, FALSE,
                                             req.ignoreLimits);
          } else {
-            retval = Vmx86_FreeLockedPages(vm, req.mpn32List,
+            retval = Vmx86_FreeLockedPages(vm, req.mpn64List,
                                            req.mpnCount, FALSE);
          }
          break;
@@ -1926,7 +1903,7 @@ LinuxDriver_Ioctl(struct inode *inode,  // IN:
          if (retval) {
             break;
          }
-         retval = Vmx86_GetLockedPageList(vm, req.mpn32List, req.mpnCount);
+         retval = Vmx86_GetLockedPageList(vm, req.mpn64List, req.mpnCount);
          break;
       }
 

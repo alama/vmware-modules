@@ -37,8 +37,6 @@
 #include "vm_basic_types.h"
 #include "vm_assert.h"
 
-EXTERN MPN shareMPN;
-
 /*
  * constants
  */
@@ -47,8 +45,8 @@ EXTERN MPN shareMPN;
 
 #define PSHARE_PAGELIST_MAX             (PAGELIST_MAX)
 #define PSHARE_PAGELIST_MIN             (8)
-#define PSHARE_P2M_BUFFER_MPNS_MAX      (8)
-#define PSHARE_P2M_BUFFER_MPNS_DEFAULT  (2)
+#define PSHARE_P2M_BUFFER_MPNS_MAX      (16)
+#define PSHARE_P2M_BUFFER_MPNS_DEFAULT  (4)
 #define PSHARE_HINT_UPDATES_MAX         (PSHARE_PAGELIST_MAX)
 #define PSHARE_HINT_PAGELIST_MAX        (PSHARE_PAGELIST_MAX)
 #define PSHARE_P2M_BUFFER_SLOTS_PER_MPN (PAGE_SIZE / sizeof(PShare_P2MUpdate))
@@ -66,23 +64,8 @@ MY_ASSERTS(PSHARE_EXT,
 
 typedef struct PShare_P2MUpdate {
    BPN     bpn;
-   MPN     mpn;
+   MPN64   mpn;
 } PShare_P2MUpdate;
-
-typedef uint8 PShareFlags;
-
-/*
- * Config information that is used by the platform to implement
- * dynamic scan rate distribution across multiple running VMs.
- */
-
-typedef struct PShare_MgmtInfo {
-   uint16      minScanRate;
-   uint16      maxScanRate;
-   uint16      curScanRate;
-   PShareFlags flags;
-   uint8       _pad[1];
-} PShare_MgmtInfo;
 
 void BusMemPShare_HandleBackdoor(void);
 #endif

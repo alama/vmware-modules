@@ -117,5 +117,6 @@ typedef struct VMXLinuxState {
 
 extern VMXLinuxState linuxState;
 extern uint8 monitorIPIVector;
+extern uint8 hvIPIVector;
 
 #endif

@@ -1,5 +1,5 @@
 /*********************************************************
- * Copyright (C) 1998 VMware, Inc. All rights reserved.
+ * Copyright (C) 1998-2014 VMware, Inc. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License as published by the
@@ -1050,38 +1050,12 @@ Vmx86GetkHzEstimate(VmTimeStart *st)	// IN: start time
     */
 
    freq = HostIF_UptimeFrequency();
-#   if defined VM_X86_64 || !defined linux
    while (cDiff > ((uint64) -1) / freq) {
       cDiff >>= 1;
       tDiff >>= 1;
    }
    hz  = (cDiff * freq) / tDiff;
    kHz = (uint32) ((hz + 500) / 1000);
-#   else
-   {
-      uint32 tmpkHz, tmp;
-
-      /* On Linux we can't do a 64/64=64 bit division, as the gcc stub
-       * for that is not linked into the kernel.  We'll assume that cDiff
-       * * freq fits into 64 bits and that tDiff fits into 32 bits.  This
-       * is safe given the values used on Linux.
-       */
-
-      Div643264(cDiff * freq, tDiff, &hz, &tmp);
-      hz += 500;
-
-      /*
-       * If result in kHz cannot fit into 32 bits, we would get a divide
-       * by zero exception.
-       */
-
-      if ((uint32)(hz >> 32) >= 1000) {
-         goto failure;
-      }
-      Div643232(hz, 1000, &tmpkHz, &tmp);
-      kHz = tmpkHz;
-   }
-#   endif
    return kHz;
 
 failure:
@@ -1244,7 +1218,8 @@ Vmx86_MonTimerIPI(void)
 
    for (vm = vmDriverList; vm != NULL; vm = vm->nextDriver) {
       Vcpuid v;
-      VCPUSet expiredVCPUs = VCPUSet_Empty();
+      VCPUSet expiredVCPUs;
+      VCPUSet_Empty(&expiredVCPUs);
 
       for (v = 0; v < vm->numVCPUs; v++) {
          VMCrossPage *crosspage = vm->crosspage[v];
@@ -1254,14 +1229,13 @@ Vmx86_MonTimerIPI(void)
          }
          expiry = crosspage->crosspageData.monTimerExpiry;
          if (expiry != 0 && expiry <= pNow) {
-            expiredVCPUs = VCPUSet_Include(expiredVCPUs, v);
+            VCPUSet_Include(&expiredVCPUs, v);
          }
       }
-      if (!VCPUSet_IsEmpty(expiredVCPUs)) {
-         if (HostIF_IPI(vm, expiredVCPUs, TRUE) == IPI_BROADCAST) {
-            // no point in doing a broadcast for more than one VM.
-            break;
-         }
+      if (!VCPUSet_IsEmpty(&expiredVCPUs) &&
+          HostIF_IPI(vm, &expiredVCPUs, TRUE) == IPI_BROADCAST) {
+         // no point in doing a broadcast for more than one VM.
+         break;
       }
    }
    HostIF_GlobalUnlock(21);
@@ -1518,7 +1492,7 @@ int
 Vmx86_LockPage(VMDriver *vm,                 // IN: VMDriver
                VA64 uAddr,                   // IN: VA of the page to lock
                Bool allowMultipleMPNsPerVA,  // IN: allow locking many pages with the same VA
-               MPN *mpn)                     // OUT
+               MPN64 *mpn)                   // OUT
 {
    int retval;
 
@@ -1591,7 +1565,7 @@ Vmx86_UnlockPage(VMDriver *vm, // IN
 
 int
 Vmx86_UnlockPageByMPN(VMDriver *vm, // IN: VMDriver
-                      MPN mpn,      // IN: the page to unlock
+                      MPN64 mpn,    // IN: the page to unlock
                       VA64 uAddr)   // IN: optional valid VA for this MPN
 {
    int retval;
@@ -1620,7 +1594,7 @@ Vmx86_UnlockPageByMPN(VMDriver *vm, // IN: VMDriver
  *
  * Results:
  *      Non-negative value on partial/full completion: actual number of
- *      allocated MPNs. MPN32s of the allocated pages are copied to the
+ *      allocated MPNs. MPNs of the allocated pages are copied to the
  *      caller's buffer at 'addr'.
  *
  *	Negative system specific error code on error (NTSTATUS on Windows,
@@ -1635,7 +1609,7 @@ Vmx86_UnlockPageByMPN(VMDriver *vm, // IN: VMDriver
 int
 Vmx86_AllocLockedPages(VMDriver *vm,	     // IN: VMDriver
 		       VA64 addr,	     // OUT: VA of an array for
-                                             //      allocated MPN32s.
+                                             //      allocated MPN64s.
 		       unsigned numPages,    // IN: number of pages to allocate
 		       Bool kernelMPNBuffer, // IN: is the MPN buffer in kernel
                                              //     or user address space?
@@ -1704,36 +1678,6 @@ Vmx86_FreeLockedPages(VMDriver *vm,	    // IN: VM instance pointer
 /*
  *----------------------------------------------------------------------
  *
- * Vmx86_IsAnonPage --
- *
- *      Queries the driver to see if the mpn is an anonymous page.
- *
- * Results:
- *      True if mpn is an anonymous page, false otherwise.
- *
- * Side effects:
- *      None.
- *
- *----------------------------------------------------------------------
- */
-
-Bool
-Vmx86_IsAnonPage(VMDriver *vm,       // IN: VM instance pointer
-                 const MPN32 mpn)    // IN: MPN we are asking about
-{
-   Bool ret;
-
-   HostIF_VMLock(vm, 16);
-   ret = HostIF_IsAnonPage(vm, mpn);
-   HostIF_VMUnlock(vm, 16);
-
-   return ret;
-}
-
-
-/*
- *----------------------------------------------------------------------
- *
  * Vmx86_GetNextAnonPage --
  *
  *      Queries the driver to retrieve the list of anonymous pages. 
@@ -1751,11 +1695,11 @@ Vmx86_IsAnonPage(VMDriver *vm,       // IN: VM instance pointer
  *----------------------------------------------------------------------
  */
 
-MPN
+MPN64
 Vmx86_GetNextAnonPage(VMDriver *vm,       // IN: VM instance pointer
-                      MPN mpn)            // IN: MPN
+                      MPN64 mpn)          // IN: MPN
 {
-   MPN ret;
+   MPN64 ret;
 
    HostIF_VMLock(vm, 22);
    ret = HostIF_GetNextAnonPage(vm, mpn);
@@ -1795,39 +1739,6 @@ Vmx86_GetLockedPageList(VMDriver *vm,          // IN: VM instance pointer
    HostIF_VMUnlock(vm, 9);
 
    return ret;
-}
-
-
-static uint64
-Vmx86CurTimeHack(void)
-{
-   uint64 curTime;
-
-#if defined(VM_X86_64) || !defined(__linux__)
-   curTime = HostIF_ReadUptime() / HostIF_UptimeFrequency();
-#else
-   /* 
-    * On 32-bit Linux we can't do a 64/64=64 bit division, as the gcc stub
-    * for that is not linked into the kernel. 
-    */
-   {
-      uint32 tmp, freq;
-      uint64 freq64;
-      freq64 = HostIF_UptimeFrequency();
-      if (freq64 > MAX_UINT32) {
-         freq = MAX_UINT32;
-         Warning(
-           "HostIF_UptimeFrequency() > 32-bits (%"FMT64"u), Set to %u!\n", 
-           freq64, freq);
-      } else {
-         freq = (uint32) freq64;
-      }
-
-      Div643264(HostIF_ReadUptime(), freq, &curTime, &tmp);
-   }
-#endif
-
-   return curTime;
 }
 
 
@@ -1883,7 +1794,7 @@ Vmx86_GetMemInfo(VMDriver *curVM,
    outArgs->globalMinAllocation = Vmx86CalculateGlobalMinAllocation(minVmMemPct);
    outArgs->minVmMemPct = minVmMemPct;
    outArgs->callerIndex = -1;
-   outArgs->currentTime = Vmx86CurTimeHack();
+   outArgs->currentTime = HostIF_ReadUptime() / HostIF_UptimeFrequency();
 
    if (curVM == NULL) {
       HostIF_GlobalUnlock(7);
@@ -2003,7 +1914,6 @@ Vmx86_Admit(VMDriver *curVM,     // IN
    curVM->memInfo.dirtiedPct = 100;
    curVM->memInfo.mainMemSize = args->memInfo->mainMemSize;
    curVM->memInfo.perVMOverhead = args->memInfo->perVMOverhead;
-   curVM->memInfo.pshareMgmtInfo = args->memInfo->pshareMgmtInfo;
 
   /*
    * Always set the allocations required for the current configuration
@@ -2024,7 +1934,7 @@ Vmx86_Admit(VMDriver *curVM,     // IN
    if (curVM->memInfo.admitted) {
       unsigned int allocatedPages, nonpaged;
       signed int pages;
-      MPN32* mpns;
+      MPN64 *mpns;
 
       /*
        * More admission control: Get enough memory for the nonpaged portion
@@ -2038,7 +1948,7 @@ Vmx86_Admit(VMDriver *curVM,     // IN
 #define ALLOCATE_CHUNK_SIZE 64
       allocatedPages = 0;
       nonpaged = args->memInfo->nonpaged + args->memInfo->anonymous;
-      mpns = HostIF_AllocKernelMem(nonpaged * sizeof(MPN32), FALSE);
+      mpns = HostIF_AllocKernelMem(nonpaged * sizeof *mpns, FALSE);
       if (mpns == NULL) {
          goto undoAdmission;
       }
@@ -2131,8 +2041,7 @@ Vmx86_Readmit(VMDriver *curVM, OvhdMem_Deltas *delta)
  *      a patch.
  *
  * Results:
- *      Sets the memory usage by this vm based on its memSample data and
- *      updates page sharing stats.
+ *      Sets the memory usage by this vm based on its memSample data.
  *
  * Side effects:
  *      None
@@ -2142,16 +2051,12 @@ Vmx86_Readmit(VMDriver *curVM, OvhdMem_Deltas *delta)
 
 void
 Vmx86_UpdateMemInfo(VMDriver *curVM,
-		    const VMMemMgmtInfoPatch *patch)
+                    const VMMemMgmtInfoPatch *patch)
 {
    ASSERT(patch->touchedPct <= 100 && patch->dirtiedPct <= 100);
    HostIF_VMLock(curVM, 13);
-   ASSERT(patch->sharedAll >= curVM->memInfo.shared);
-   curVM->memInfo.sharedUsr = patch->sharedAll - curVM->memInfo.shared;
    curVM->memInfo.touchedPct = AsPercent(patch->touchedPct);
    curVM->memInfo.dirtiedPct = AsPercent(patch->dirtiedPct);
-   curVM->memInfo.sharedPctAvg = patch->sharedPctAvg;
-   curVM->memInfo.breaksAvg = patch->breaksAvg;
    curVM->memInfo.hugePageBytes = patch->hugePageBytes;
    HostIF_VMUnlock(curVM, 13);
 }
@@ -2213,67 +2118,6 @@ Vmx86_VMXEnabled(void)
    } else {
       return FALSE;
    }
-}
-
-
-/*
- *----------------------------------------------------------------------
- *
- * Vmx86_InCompatMode --
- *
- *      See if kernel is running in compatibility mode.
- *
- * Returns:
- *      FALSE if running in full 64-bit mode.
- *      FALSE if running in legacy 32-bit mode.
- *      TRUE if running in compatibility mode.
- *
- * Side effects:
- *      None.
- *
- *----------------------------------------------------------------------
- */
-
-Bool
-Vmx86_InCompatMode(void)
-{
-#if defined __APPLE__ && !vm_x86_64
-   return Vmx86_InLongMode();
-#else
-   return FALSE;
-#endif
-}
-
-
-/*
- *----------------------------------------------------------------------
- *
- * Vmx86_InLongMode --
- *
- *      See if kernel is running in long (64-bit or compatibility) mode.
- *
- * Returns:
- *      FALSE if running in legacy 32-bit mode.
- *      TRUE if running in full 64-bit mode.
- *      TRUE if running in compatibility mode.
- *
- * Side effects:
- *      None.
- *
- *----------------------------------------------------------------------
- */
-
-Bool
-Vmx86_InLongMode(void)
-{
-#if defined __APPLE__ && !vm_x86_64
-   uint64 efer;
-
-   efer = __GET_MSR(MSR_EFER);
-   return (efer & MSR_EFER_LME) != 0;
-#else
-   return vm_x86_64;
-#endif
 }
 
 
@@ -2442,7 +2286,7 @@ Vmx86_FastSuspResGetMyFlag(VMDriver *vm,   // IN
  */
 
 static void
-Vmx86EnableHVOnCPU(void *clientData) // Always NULL
+Vmx86EnableHVOnCPU(void)
 {
    if (SVM_CapableCPU()) {
       uint64 vmCR = __GET_MSR(MSR_VM_CR);
@@ -2461,30 +2305,6 @@ Vmx86EnableHVOnCPU(void *clientData) // Always NULL
          __SET_MSR(MSR_FEATCTL, featCtl | MSR_FEATCTL_LOCK | MSR_FEATCTL_VMXE);
       }
    }
-}
-
-
-/*
- *-----------------------------------------------------------------------------
- *
- * Vmx86_EnableHV --
- *
- *      Enable HV for all CPUs, if possible.
- *
- * Results:
- *      None.
- *
- * Side effects:
- *      Enables HV on all CPUs, if possible.
- *
- *-----------------------------------------------------------------------------
- */
-
-void
-Vmx86_EnableHV(void)
-{
-   Log("Enabling HV on all CPUs.\n");
-   HostIF_CallOnEachCPU(Vmx86EnableHVOnCPU, NULL);
 }
 
 
@@ -2756,11 +2576,12 @@ Vmx86GetMSR(void *clientData) // IN/OUT: A Vmx86GetMSRData *
       err = 0;
    } else {
       /*
-       * To work around buggy firmware, always try to enable VT-x before
-       * querying the feature control MSR.  See PR 1020692.
+       * Try to enable HV any time these MSRs are queried.  We have seen
+       * buggy formware that forgets to re-enable HV after waking from
+       * deep sleep. [PR 1020692]
        */
-      if (query->msrNum == MSR_FEATCTL) {
-         Vmx86EnableHVOnCPU(NULL);
+      if (query->msrNum == MSR_FEATCTL || query->msrNum == MSR_VM_CR) {
+         Vmx86EnableHVOnCPU();
       }
       err = HostIF_SafeRDMSR(query->msrNum, &query->logicalCPUs[index].msrVal);
    }
@@ -2841,11 +2662,11 @@ Vmx86_GetAllMSRs(MSRQuery *query) // IN/OUT
  */
 
 void
-Vmx86_YieldToSet(VMDriver *vm,     // IN:
-                 Vcpuid currVcpu,  // IN:
-                 VCPUSet req,      // IN:
-                 uint32 usecs,     // IN:
-                 Bool skew)        // IN:
+Vmx86_YieldToSet(VMDriver *vm,       // IN:
+                 Vcpuid currVcpu,    // IN:
+                 const VCPUSet *req, // IN:
+                 uint32 usecs,       // IN:
+                 Bool skew)          // IN:
 {
    VCPUSet vcpus;
 
@@ -2871,7 +2692,7 @@ Vmx86_YieldToSet(VMDriver *vm,     // IN:
       return;
    }
 
-   vcpus = VCPUSet_Empty();
+   VCPUSet_Empty(&vcpus);
    FOR_EACH_VCPU_IN_SET(req, vcpuid) {
       if (vcpuid == currVcpu) {
          continue;
@@ -2897,9 +2718,8 @@ Vmx86_YieldToSet(VMDriver *vm,     // IN:
       if (vm->currentHostCpu[vcpuid] != INVALID_PCPU) {
          VCPUSet_AtomicRemove(&vm->crosscallWaitSet[vcpuid], currVcpu);
       } else {
-         if (VCPUSet_AtomicIsMember(&vm->crosscallWaitSet[vcpuid],
-                                    currVcpu)) {
-            vcpus = VCPUSet_Include(vcpus, vcpuid);
+         if (VCPUSet_AtomicIsMember(&vm->crosscallWaitSet[vcpuid], currVcpu)) {
+            VCPUSet_Include(&vcpus, vcpuid);
          }
       }
    } ROF_EACH_VCPU_IN_SET();
@@ -2917,11 +2737,9 @@ Vmx86_YieldToSet(VMDriver *vm,     // IN:
     * waiting for has run.
     */
 
-   if (!VCPUSet_IsEmpty(vcpus) &&
-       VCPUSet_IsEmpty(vm->crosscallWaitSet[currVcpu])) {
-
+   if (!VCPUSet_IsEmpty(&vcpus) &&
+       VCPUSet_IsEmpty(&vm->crosscallWaitSet[currVcpu])) {
       HostIF_WaitForThreads(vm, currVcpu);
-
    }
 
    /*
@@ -2930,7 +2748,7 @@ Vmx86_YieldToSet(VMDriver *vm,     // IN:
     * bits anyway.
     */
 
-   FOR_EACH_VCPU_IN_SET(vcpus, vcpuid) {
+   FOR_EACH_VCPU_IN_SET(&vcpus, vcpuid) {
       VCPUSet_AtomicRemove(&vm->crosscallWaitSet[vcpuid], currVcpu);
    } ROF_EACH_VCPU_IN_SET();
 
@@ -2941,11 +2759,73 @@ Vmx86_YieldToSet(VMDriver *vm,     // IN:
 /*
  *----------------------------------------------------------------------
  *
- * Vmx86GetUnavailPerfCtrsOnCPU --
+ * Vmx86PerfCtrInUse --
  *
  *      Determine which performance counters are already in use by the
  *      host on the current PCPU.  A performance counter is considered
- *      in use if its event select enable bit is set.
+ *      in use if its event select enable bit is set or if this method
+ *      is unable to count events with the performance counter.
+ *
+ * Results:
+ *      Return TRUE if counter is in use.
+ *
+ * Side effects:
+ *      None.
+ *----------------------------------------------------------------------
+ */
+static Bool
+Vmx86PerfCtrInUse(Bool isGen, unsigned pmcNum, unsigned ctrlMSR,
+                  unsigned cntMSR, Bool hasPGC)
+{
+   volatile unsigned delay;
+   uint64 origPGC = hasPGC ? __GET_MSR(PERFCTR_CORE_GLOBAL_CTRL_ADDR) : 0;
+   uint64 pmcCtrl;
+   uint64 pmcCount, count;
+   uint64 ctrlEna, pgcEna;
+
+   pmcCtrl = __GET_MSR(ctrlMSR);
+   if (isGen) {
+      ASSERT(pmcNum < 32);
+      if ((pmcCtrl & PERFCTR_CPU_ENABLE) != 0) {
+         return TRUE;
+      }
+      ctrlEna = PERFCTR_CPU_ENABLE | PERFCTR_CPU_KERNEL_MODE |
+                PERFCTR_CORE_INST_RETIRED;
+      pgcEna = CONST64U(1) << pmcNum;
+   } else {
+      ASSERT(pmcNum < 3);
+      if ((pmcCtrl & PERFCTR_CORE_FIXED_ENABLE_MASKn(pmcNum)) != 0) {
+         return TRUE;
+      }
+      ctrlEna = pmcCtrl | PERFCTR_CORE_FIXED_KERNEL_MASKn(pmcNum);
+      pgcEna = CONST64U(1) << (pmcNum + 32);
+   }
+   pmcCount = __GET_MSR(cntMSR);
+   /* Enable the counter. */
+   __SET_MSR(ctrlMSR, ctrlEna);
+   if (hasPGC) {
+      __SET_MSR(PERFCTR_CORE_GLOBAL_CTRL_ADDR, pgcEna | origPGC);
+   }
+   /* Retire some instructions and wait a few cycles. */
+   for (delay = 0; delay < 100; delay++) ;
+   /* Disable the counter. */
+   if (hasPGC) {
+      __SET_MSR(PERFCTR_CORE_GLOBAL_CTRL_ADDR, origPGC);
+   }
+   count = __GET_MSR(cntMSR);
+   __SET_MSR(ctrlMSR, pmcCtrl);
+   __SET_MSR(cntMSR, pmcCount);
+   return count == pmcCount;
+}
+
+
+/*
+ *----------------------------------------------------------------------
+ *
+ * Vmx86GetUnavailPerfCtrsOnCPU --
+ *
+ *      Determine which performance counters are already in use by the
+ *      host on the current PCPU. 
  *
  * Results:
  *      A bitset representing unavailable performance counter.
@@ -2964,7 +2844,10 @@ Vmx86GetUnavailPerfCtrsOnCPU(void *data)
    CPUIDRegs regs;
    unsigned i, numGen = 0, numFix = 0, stride = 1;
    uint32 selBase = 0;
+   uint32 ctrBase = 0;
+   Bool hasPGC = FALSE;
    Atomic_uint64 *ctrs = (Atomic_uint64 *)data;
+   uintptr_t flags;
    if (CPUID_GetVendor() == CPUID_VENDOR_INTEL) {
       unsigned version;
       if (__GET_EAX_FROM_CPUID(0) < 0xA) {
@@ -2978,34 +2861,46 @@ Vmx86GetUnavailPerfCtrsOnCPU(void *data)
       numGen = CPUID_GET(0xA, EAX, PMC_NUM_GEN, regs.eax);
       if (version >= 2) {
          numFix = CPUID_GET(0xA, EDX, PMC_NUM_FIXED, regs.edx);
+         hasPGC = TRUE;
       }
       selBase = PERFCTR_CORE_PERFEVTSEL0_ADDR;
+      ctrBase = PERFCTR_CORE_PERFCTR0_ADDR;
    } else if (CPUID_GetVendor() == CPUID_VENDOR_AMD) {
       if (CPUID_FAMILY_IS_BULLDOZER(__GET_EAX_FROM_CPUID(1))) {
          numGen  = 6;
          selBase = PERFCTR_BD_BASE_ADDR + PERFCTR_BD_EVENTSEL;
+         ctrBase = PERFCTR_BD_BASE_ADDR + PERFCTR_BD_CTR;
          stride  = 2;
       } else {
          numGen  = 4;
          selBase = PERFCTR_AMD_PERFEVTSEL0_ADDR;
+         ctrBase = PERFCTR_AMD_PERFCTR0_ADDR;
       }
    }
    ASSERT(numGen <= 32 && numFix <= 32);
+
+   /*
+    * Vmx86PerfCtrInUse modifies performance counters to determine if
+    * if they are usable, disable interrupts to avoid racing with
+    * interrupt handlers.
+    */
+   SAVE_FLAGS(flags);
+   CLEAR_INTERRUPTS();
    for (i = 0; i < numGen; i++) {
-      uint32 msr = selBase + (i * stride);
-      uint64 sel = __GET_MSR(msr);
-      if ((sel & PERFCTR_CPU_ENABLE) != 0) {
+      if (Vmx86PerfCtrInUse(TRUE, i, selBase + i * stride,
+                            ctrBase + i * stride, hasPGC)) {
          Atomic_SetBit64(ctrs, i);
       }
    }
    if (numFix > 0) {
-      uint64 fcc = __GET_MSR(PERFCTR_CORE_FIXED_CTR_CTRL_ADDR);
       for (i = 0; i < numFix; i++) {
-         if ((fcc & PERFCTR_CORE_FIXED_ENABLE_MASKn(i)) != 0) {
+         if (Vmx86PerfCtrInUse(FALSE, i, PERFCTR_CORE_FIXED_CTR_CTRL_ADDR,
+                               PERFCTR_CORE_FIXED_CTR0_ADDR + i, hasPGC)) {
             Atomic_SetBit64(ctrs, i + 32);
          }
       }
    }
+   RESTORE_FLAGS(flags);
 }
 
 

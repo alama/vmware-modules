@@ -1,5 +1,5 @@
 /*********************************************************
- * Copyright (C) 2000-2012 VMware, Inc. All rights reserved.
+ * Copyright (C) 2000-2014 VMware, Inc. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License as published by the
@@ -19,7 +19,7 @@
 /*
  * vmmem_shared.h --
  *
- *	This is the header file for machine memory manager.
+ *      This is the header file for machine memory manager.
  */
 
 
@@ -36,19 +36,6 @@
 /*
  * Page remapping definitions.
  */
-
-// Type of Page Operations
-typedef enum VmMemRemap_Type {
-   VMMEM_REMAP_NONE,
-   VMMEM_REMAP_LPAGE,
-   VMMEM_REMAP_SPAGE,
-   VMMEM_REMAP_NUMA
-} VmMemRemap_Type;
-
-#define VMMEM_REMAP_IS_LPAGE(x)     ((x) == VMMEM_REMAP_LPAGE)
-#define VMMEM_REMAP_IS_SPAGE(x)     ((x) == VMMEM_REMAP_SPAGE)
-#define VMMEM_REMAP_IS_NUMA(x)      ((x) == VMMEM_REMAP_NUMA)
-#define VMMEM_REMAP_IS_COLOR(x)     ((x) == VMMEM_REMAP_COLOR)
 
 #define VMMEM_FLAG_BIT(x) (1 << (x))
 
@@ -74,25 +61,24 @@ typedef enum VmMemRemap_Type {
 #define VMMEM_PLATFORM_COW                VMMEM_FLAG_BIT(2)
 #define VMMEM_PLATFORM_EXPOSED_TO_VMM     VMMEM_FLAG_BIT(3)
 #define VMMEM_PLATFORM_P2M_UPDATE_PENDING VMMEM_FLAG_BIT(4)
-#define VMMEM_PLATFORM_DIRTY              VMMEM_FLAG_BIT(5)
-#define VMMEM_PLATFORM_BACKED_LARGE       VMMEM_FLAG_BIT(6)
-#define VMMEM_PLATFORM_ALL_FLAGS          MASK(7)
+#define VMMEM_PLATFORM_BACKED_LARGE       VMMEM_FLAG_BIT(5)
+#define VMMEM_PLATFORM_TRY_COW_SUCCESS    VMMEM_FLAG_BIT(6)
 
-//TODO: Adjust the value according to the size of new structure BusmemServices_PageInfo
-#define MAX_PLATFORM_PAGE_INFO_PAGES  (16) // limited by rpc block size
+#ifndef VMX86_SERVER
+#define VMMEM_PLATFORM_DIRTY              VMMEM_FLAG_BIT(7)
+#endif
+
+#define MAX_PLATFORM_PAGE_INFO_PAGES  160
 
 /*
  * Structure used to query platform about the page state.
  */
-typedef struct PlatformPageInfo {
-   MPN    hostMPN;                 // mpn for this page in the host
-   uint8  flags; 
-} PlatformPageInfo;
-
 typedef struct PlatformPageInfoList {
-   uint32           numPages;
-   BPN              bpn[MAX_PLATFORM_PAGE_INFO_PAGES]; // bpns to check
-   PlatformPageInfo info[MAX_PLATFORM_PAGE_INFO_PAGES];
+   uint32 numPages;
+   uint32 _pad;
+   BPN    bpn[MAX_PLATFORM_PAGE_INFO_PAGES];    // bpns to check
+   MPN64  mpn[MAX_PLATFORM_PAGE_INFO_PAGES];    // filled in by host
+   uint8  flags[MAX_PLATFORM_PAGE_INFO_PAGES];  // filled in by host
 } PlatformPageInfoList;
 
 #define VMMEM_SERVICES_TYPE_2_MASK(type)                  \
@@ -117,9 +103,21 @@ typedef enum VmMemServices_Type {
 #ifdef VMX86_SERVER
 #define VMMEMPERIODIC_DEFS              \
    MDEF(VMMEMPERIODIC_TYPE_RELIABLEMEM, \
-        ReliableMem_PickupVmPages,      \
+        AsyncRemap_PickupVmPages,       \
         BusMemRemap_FilterPages,        \
-        ReliableMem_CompleteVmPages)
+        AsyncRemap_CompleteVmPages)     \
+   MDEF(VMMEMPERIODIC_TYPE_PAGERETIRE,  \
+        AsyncRemap_PickupVmPages,       \
+        BusMemRemap_FilterPages,        \
+        AsyncRemap_CompleteVmPages)     \
+   MDEF(VMMEMPERIODIC_TYPE_LPAGE,       \
+        AsyncRemap_PickupVmPages,       \
+        BusMemRemap_FilterPages,        \
+        AsyncRemap_CompleteVmPages)     \
+   MDEF(VMMEMPERIODIC_TYPE_NUMA,        \
+        AsyncRemap_PickupVmPages,       \
+        BusMemRemap_FilterPages,        \
+        AsyncRemap_CompleteVmPages)
 #else
 #define VMMEMPERIODIC_DEFS
    // MDEF(_type, _selectFn, _filterFn, _completeFn)

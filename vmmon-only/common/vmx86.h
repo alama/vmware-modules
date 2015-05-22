@@ -1,5 +1,5 @@
 /*********************************************************
- * Copyright (C) 1998 VMware, Inc. All rights reserved.
+ * Copyright (C) 1998-2013 VMware, Inc. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License as published by the
@@ -66,7 +66,7 @@ typedef struct VMDriver {
    /* Pointers to the crossover pages shared with the monitor. */
    struct VMCrossPage          *crosspage[MAX_INITBLOCK_CPUS];
    volatile uint32              currentHostCpu[MAX_INITBLOCK_CPUS];
-   volatile VCPUSet             crosscallWaitSet[MAX_INITBLOCK_CPUS];
+   VCPUSet                      crosscallWaitSet[MAX_INITBLOCK_CPUS];
    APICDescriptor               hostAPIC;
 
    struct MemTrack             *memtracker;   /* Memory tracker pointer */
@@ -110,7 +110,7 @@ extern int Vmx86_ReleaseVM(VMDriver *vm);
 extern int Vmx86_InitVM(VMDriver *vm, InitBlock *initParams);
 extern int Vmx86_LateInitVM(VMDriver *vm);
 extern int Vmx86_RunVM(VMDriver *vm, Vcpuid vcpuid);
-extern void Vmx86_YieldToSet(VMDriver *vm, Vcpuid currVcpu, VCPUSet req,
+extern void Vmx86_YieldToSet(VMDriver *vm, Vcpuid currVcpu, const VCPUSet *req,
                              uint32 usecs, Bool skew);
 extern void Vmx86_ReadTSCAndUptime(VmTimeStart *st);
 extern uint32 Vmx86_GetkHzEstimate(VmTimeStart *st);
@@ -118,20 +118,19 @@ extern int Vmx86_SetHostClockRate(VMDriver *vm, int rate);
 extern int Vmx86_LockPage(VMDriver *vm,
                           VA64 uAddr,
                           Bool allowMultipleMPNsPerVA,
-                          MPN *mpn);
+                          MPN64 *mpn);
 extern int Vmx86_UnlockPage(VMDriver *vm, VA64 uAddr);
-extern int Vmx86_UnlockPageByMPN(VMDriver *vm, MPN mpn, VA64 uAddr);
-extern MPN Vmx86_GetRecycledPage(VMDriver *vm);
-extern int Vmx86_ReleaseAnonPage(VMDriver *vm, MPN mpn);
+extern int Vmx86_UnlockPageByMPN(VMDriver *vm, MPN64 mpn, VA64 uAddr);
+extern MPN64 Vmx86_GetRecycledPage(VMDriver *vm);
+extern int Vmx86_ReleaseAnonPage(VMDriver *vm, MPN64 mpn);
 extern int Vmx86_AllocLockedPages(VMDriver *vm, VA64 addr,
 				  unsigned numPages, Bool kernelMPNBuffer,
                                   Bool ignoreLimits);
 extern int Vmx86_FreeLockedPages(VMDriver *vm, VA64 addr,
 				 unsigned numPages, Bool kernelMPNBuffer);
-extern MPN Vmx86_GetNextAnonPage(VMDriver *vm, MPN mpn);
+extern MPN64 Vmx86_GetNextAnonPage(VMDriver *vm, MPN64 mpn);
 extern int Vmx86_GetLockedPageList(VMDriver *vm, VA64 uAddr,
 				   unsigned int numPages);
-extern Bool Vmx86_IsAnonPage(VMDriver *vm, const MPN32 mpn);
 
 extern int32 Vmx86_GetNumVMs(void);
 extern int32 Vmx86_GetTotalMemUsage(void);
@@ -145,19 +144,16 @@ extern void Vmx86_Admit(VMDriver *curVM, VMMemInfoArgs *args);
 extern Bool Vmx86_Readmit(VMDriver *curVM, OvhdMem_Deltas *delta);
 extern void Vmx86_UpdateMemInfo(VMDriver *curVM,
                                 const VMMemMgmtInfoPatch *patch);
-extern void Vmx86_Add2MonPageTable(VMDriver *vm, VPN vpn, MPN mpn,
+extern void Vmx86_Add2MonPageTable(VMDriver *vm, VPN vpn, MPN64 mpn,
 				   Bool readOnly);
 extern Bool Vmx86_PAEEnabled(void);
 extern Bool Vmx86_VMXEnabled(void);
-extern void Vmx86_EnableHV(void);
 extern Bool Vmx86_GetAllMSRs(MSRQuery *query);
 extern void Vmx86_MonTimerIPI(void);
 extern void Vmx86_InitIDList(void);
 extern VMDriver *Vmx86_LookupVMByUserID(int userID);
 extern Bool Vmx86_FastSuspResSetOtherFlag(VMDriver *vm, int otherVmUserId);
 extern int  Vmx86_FastSuspResGetMyFlag(VMDriver *vm, Bool blockWait);
-extern Bool Vmx86_InCompatMode(void);
-extern Bool Vmx86_InLongMode(void);
 extern void Vmx86_Open(void);
 extern void Vmx86_Close(void);
 

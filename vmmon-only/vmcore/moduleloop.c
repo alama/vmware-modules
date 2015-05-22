@@ -1,5 +1,5 @@
 /*********************************************************
- * Copyright (C) 1998 VMware, Inc. All rights reserved.
+ * Copyright (C) 1998-2014 VMware, Inc. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License as published by the
@@ -97,16 +97,16 @@ Vmx86_RunVM(VMDriver *vm,   // IN:
        * Wake up anything that was waiting for this vcpu to run
        */
 
-      if ((VCPUSet_IsEmpty(crosspage->yieldVCPUs) &&
-          (crosspage->moduleCallType != MODULECALL_COSCHED)) ||
-          (crosspage->moduleCallType == MODULECALL_SEMAWAIT)) {
+      if ((VCPUSet_IsEmpty(&crosspage->yieldVCPUs) &&
+           crosspage->moduleCallType != MODULECALL_COSCHED) ||
+          crosspage->moduleCallType == MODULECALL_SEMAWAIT) {
          HostIF_WakeUpYielders(vm, vcpuid);
       }
 
-      if (!VCPUSet_IsEmpty(crosspage->yieldVCPUs) &&
-          (crosspage->moduleCallType != MODULECALL_COSCHED) &&
-          (crosspage->moduleCallType != MODULECALL_SEMAWAIT)) {
-         Vmx86_YieldToSet(vm, vcpuid, crosspage->yieldVCPUs, 0, TRUE);
+      if (!VCPUSet_IsEmpty(&crosspage->yieldVCPUs) &&
+          crosspage->moduleCallType != MODULECALL_COSCHED &&
+          crosspage->moduleCallType != MODULECALL_SEMAWAIT) {
+         Vmx86_YieldToSet(vm, vcpuid, &crosspage->yieldVCPUs, 0, TRUE);
       }
 
 skipTaskSwitch:;
@@ -131,8 +131,8 @@ skipTaskSwitch:;
          break;
 
       case MODULECALL_GET_RECYCLED_PAGES: {
-         MPN32 mpns[MODULECALL_NUM_ARGS];
-         int nPages = MIN(crosspage->args[0], MODULECALL_NUM_ARGS);
+         MPN64 mpns[MODULECALL_NUM_ARGS];
+         int nPages = MIN((int)crosspage->args[0], MODULECALL_NUM_ARGS);
 
          retval = Vmx86_AllocLockedPages(vm, PtrToVA64(mpns), nPages, TRUE,
                                          FALSE);
@@ -172,28 +172,25 @@ skipTaskSwitch:;
       }
 
       case MODULECALL_SEMAFORCEWAKEUP: {
-         VCPUSet wakeVCPUs = (VCPUSet)QWORD(crosspage->args[0],
-                                            crosspage->args[1]);
-         FOR_EACH_VCPU_IN_SET(wakeVCPUs, v) {
-            HostIF_SemaphoreForceWakeup(vm, v);
-         } ROF_EACH_VCPU_IN_SET();
+         ASSERT_ON_COMPILE(sizeof(VCPUSet) <= sizeof(crosspage->args));
+         HostIF_SemaphoreForceWakeup(vm, (VCPUSet *) &crosspage->args[0]);
          break;
       }
 
       case MODULECALL_IPI: {
          HostIFIPIMode mode;
-         VCPUSet vcpus = (VCPUSet)QWORD(crosspage->args[0], crosspage->args[1]);
-         
-         mode = HostIF_IPI(vm, vcpus, TRUE);
+         ASSERT_ON_COMPILE(sizeof(VCPUSet) <= sizeof(crosspage->args));
+         mode = HostIF_IPI(vm, (VCPUSet *) &crosspage->args[0], TRUE);
          retval = (mode != IPI_NONE);
          break;
       }
 
       case MODULECALL_RELEASE_ANON_PAGES: {
          unsigned count;
-         MPN32 mpns[MODULECALL_NUM_ARGS];
+         MPN64 mpns[MODULECALL_NUM_ARGS];
          for (count = 0; count < MODULECALL_NUM_ARGS; count++) {
-            if ((mpns[count] = (MPN32)crosspage->args[count]) == INVALID_MPN) {
+            mpns[count] = (MPN64)crosspage->args[count];
+            if (mpns[count] == INVALID_MPN) {
                break;
             }
          }
@@ -202,62 +199,40 @@ skipTaskSwitch:;
          break;
       }
 
-      case MODULECALL_IS_ANON_PAGE: {
-         MPN32 mpn = (MPN32)crosspage->args[0];
-         retval = Vmx86_IsAnonPage(vm, mpn);
+      case MODULECALL_LOOKUP_MPN: {
+         int i;
+         VPN64  vpn    = (VPN64)crosspage->args[0];
+         uint32 nPages = (uint32)crosspage->args[1];
+         VA64   uAddr  = (VA64)VPN_2_VA(vpn);
+         ASSERT(nPages <= MODULECALL_NUM_ARGS);
+         for (i = 0; i < nPages; i++) {
+            MPN64 mpn;
+            HostIF_LookupUserMPN(vm, uAddr + i * PAGE_SIZE, &mpn);
+            crosspage->args[i] = mpn;
+         }
          break;
       }
 
-      case MODULECALL_LOOKUP_MPN: {
-         int i;
-         VPN64 vpn = (VPN64)QWORD(crosspage->args[0], crosspage->args[1]);
-         uint32 nPages = crosspage->args[2];
-         VA64 uAddr = (VA64)VPN_2_VA(vpn);
-         ASSERT(nPages <= MODULECALL_NUM_ARGS);
-         for (i = 0; i < nPages; i++) {
-            HostIF_LookupUserMPN(vm, uAddr + i * PAGE_SIZE,
-                                 &crosspage->args[i]);
-         }
+      case MODULECALL_PIN_MPN: {
+         MPN64 mpn;
+         VPN64 vpn = crosspage->args[0];
+         VA64   va = VPN_2_VA(vpn);
+         retval = Vmx86_LockPage(vm, va, FALSE, &mpn);
+         crosspage->args[0] = mpn;
          break;
       }
 
       case MODULECALL_COSCHED: {
-         VCPUSet wakeVCPUs = (VCPUSet)QWORD(crosspage->args[0],
-                                            crosspage->args[1]);
-         uint32 spinUS     = (uint32)crosspage->args[2];
-
-         Vmx86_YieldToSet(vm, vcpuid, wakeVCPUs, spinUS, FALSE);
+         uint32 spinUS = (uint32)crosspage->args[2];
+         ASSERT_ON_COMPILE(sizeof(VCPUSet) + sizeof(uint32) <=
+                           sizeof(crosspage->args));
+         Vmx86_YieldToSet(vm, vcpuid, (VCPUSet *) &crosspage->args[0],
+                          spinUS, FALSE);
          break;
       }
 
-      case MODULECALL_START_VMX_OP: {
-         int numVMCSes;
-         int i;
-
-         numVMCSes = crosspage->args[0];
-         ASSERT(numVMCSes >= 0);
-         ASSERT(numVMCSes <= MAX_DUMMY_VMCSES);
-         for (i = 0; i < numVMCSes; i++) {
-            MPN dummyVMCS = Task_GetDummyVMCS(i);
-
-            if (dummyVMCS == INVALID_MPN) {
-               bailValue = USERCALL_VMX86ALLOCERR;
-               goto bailOut;
-            }
-            crosspage->dummyVMCS[i] = MPN_2_MA(dummyVMCS);
-         }
-
-         crosspage->inVMXOperation = 1;
-         /*
-          * PR 454299: Preserve previous crosspage->retval.
-          */
-         retval = crosspage->retval;
-      } break;
-
       case MODULECALL_ALLOC_VMX_PAGE: {
-         if (Task_GetRootVMCS(crosspage->pcpuNum) == INVALID_MPN) {
-            crosspage->inVMXOperation = 0;
-
+         if (Task_GetHVRootPageForPCPU(crosspage->pcpuNum) == INVALID_MPN) {
             bailValue = USERCALL_VMX86ALLOCERR;
             goto bailOut;
          }

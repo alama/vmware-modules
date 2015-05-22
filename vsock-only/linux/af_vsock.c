@@ -1,5 +1,5 @@
 /*********************************************************
- * Copyright (C) 2007-2011 VMware, Inc. All rights reserved.
+ * Copyright (C) 2007-2014 VMware, Inc. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License as published by the
@@ -19,7 +19,7 @@
 /*
  * af_vsock.c --
  *
- *      Linux socket module for the VMCI Sockets protocol family.
+ *      Linux socket module for the vSockets protocol family.
  */
 
 
@@ -373,7 +373,6 @@ static int vsockVmciKernClientCount = 0;
 static Bool vmciDevicePresent = FALSE;
 static VMCIHandle vmciStreamHandle = { VMCI_INVALID_ID, VMCI_INVALID_ID };
 static VMCIId qpResumedSubId = VMCI_INVALID_ID;
-static VMCIId ctxUpdatedSubId = VMCI_INVALID_ID;
 
 static int PROTOCOL_OVERRIDE = -1;
 
@@ -567,6 +566,10 @@ Bool
 VSockVmciAllowDgram(VSockVmciSock *vsock, // IN: Local socket
                     VMCIId peerCid)       // IN: Context ID of peer
 {
+   if (peerCid == VMCI_HYPERVISOR_CONTEXT_ID) {
+      return TRUE;
+   }
+
    if (vsock->cachedPeer != peerCid) {
       vsock->cachedPeer = peerCid;
       if (!VSockVmciTrusted(vsock, peerCid) &&
@@ -588,7 +591,7 @@ VSockVmciAllowDgram(VSockVmciSock *vsock, // IN: Local socket
  * VMCISock_GetAFValue --
  *
  *      Kernel interface that allows external kernel modules to get the current
- *      VMCI Sockets address family.
+ *      vSockets address family.
  *      This version of the function is exported to kernel clients and should not
  *      change.
  *
@@ -610,7 +613,7 @@ VMCISock_GetAFValue(void)
 
    /*
     * Kernel clients are required to explicitly register themselves before they
-    * can use VMCI Sockets.
+    * can use vSockets.
     */
    if (vsockVmciKernClientCount <= 0) {
       afvalue = -1;
@@ -654,7 +657,7 @@ VMCISock_GetLocalCID(void)
 
    /*
     * Kernel clients are required to explicitly register themselves before they
-    * can use VMCI Sockets.
+    * can use vSockets.
     */
    if (vsockVmciKernClientCount <= 0) {
       cid = -1;
@@ -675,7 +678,7 @@ EXPORT_SYMBOL(VMCISock_GetLocalCID);
  *
  * VMCISock_KernelRegister --
  *
- *      Allows a kernel client to register with VMCI Sockets. Must be called
+ *      Allows a kernel client to register with vSockets. Must be called
  *      before VMCISock_GetAFValue within a kernel module. Note that we don't
  *      actually register the address family until the first time the module
  *      needs to use it.
@@ -704,7 +707,7 @@ EXPORT_SYMBOL(VMCISock_KernelRegister);
  *
  * VMCISock_KernelDeregister --
  *
- *      Allows a kernel client to unregister with VMCI Sockets. Every call
+ *      Allows a kernel client to unregister with vSockets. Every call
  *      to VMCISock_KernRegister must be matched with a call to
  *      VMCISock_KernUnregister.
  *
@@ -1022,6 +1025,7 @@ VSockVmciRecvStreamCB(void *data,           // IN
    struct sockaddr_vm src;
    VSockPacket *pkt;
    VSockVmciSock *vsk;
+   VMCIId expectedSrcRid;
    Bool bhProcessPkt;
    int err;
 
@@ -1037,8 +1041,12 @@ VSockVmciRecvStreamCB(void *data,           // IN
     * aren't vsock implementations.
     */
 
+   expectedSrcRid =
+      VMCI_HYPERVISOR_CONTEXT_ID == VMCI_HANDLE_TO_CONTEXT_ID(dg->src) ?
+      VSOCK_PACKET_HYPERVISOR_RID : VSOCK_PACKET_RID;
+
    if (!VSockAddr_SocketContextStream(VMCI_HANDLE_TO_CONTEXT_ID(dg->src)) ||
-       VSOCK_PACKET_RID != VMCI_HANDLE_TO_RESOURCE_ID(dg->src)) {
+       expectedSrcRid != VMCI_HANDLE_TO_RESOURCE_ID(dg->src)) {
       return VMCI_ERROR_NO_ACCESS;
    }
 
@@ -1123,8 +1131,14 @@ VSockVmciRecvStreamCB(void *data,           // IN
     */
    bh_lock_sock(sk);
 
-   if (!sock_owned_by_user(sk) && sk->sk_state == SS_CONNECTED) {
-      NOTIFYCALL(vsk, handleNotifyPkt, sk, pkt, TRUE, &dst, &src, &bhProcessPkt);
+   if (!sock_owned_by_user(sk)) {
+      /* The local context ID may be out of date. */
+      vsk->localAddr.svm_cid = dst.svm_cid;
+
+      if (sk->sk_state == SS_CONNECTED) {
+         NOTIFYCALL(vsk, handleNotifyPkt, sk, pkt, TRUE, &dst, &src,
+                    &bhProcessPkt);
+      }
    }
 
    bh_unlock_sock(sk);
@@ -1506,6 +1520,9 @@ VSockVmciRecvPktWork(compat_work_arg work)  // IN
 
    lock_sock(sk);
 
+   /* The local context ID may be out of date. */
+   vsock_sk(sk)->localAddr.svm_cid = VMCI_HANDLE_TO_CONTEXT_ID(pkt->dg.dst);
+
    switch (sk->sk_state) {
    case SS_LISTEN:
       VSockVmciRecvListen(sk, pkt);
@@ -1588,6 +1605,11 @@ VSockVmciRecvListen(struct sock *sk,   // IN
    pending = VSockVmciGetPending(sk, pkt);
    if (pending) {
       lock_sock(pending);
+
+      /* The local context ID may be out of date. */
+      vsock_sk(pending)->localAddr.svm_cid =
+         VMCI_HANDLE_TO_CONTEXT_ID(pkt->dg.dst);
+
       switch (pending->sk_state) {
       case SS_CONNECTING:
          err = VSockVmciRecvConnectingServer(sk, pending, pkt);
@@ -3058,7 +3080,7 @@ VSockVmciQueueRcvSkb(struct sock *sk,     // IN
  *
  * VSockVmciRegisterProto --
  *
- *      Registers the vmci sockets protocol family.
+ *      Registers the vSockets protocol family.
  *
  * Results:
  *      Zero on success, error code on failure.
@@ -3102,7 +3124,7 @@ VSockVmciRegisterProto(void)
  *
  * VSockVmciUnregisterProto --
  *
- *      Unregisters the vmci sockets protocol family.
+ *      Unregisters the vSockets protocol family.
  *
  * Results:
  *      None.
@@ -3318,11 +3340,6 @@ VSockVmciUnregisterWithVmci(void)
    if (qpResumedSubId != VMCI_INVALID_ID) {
       vmci_event_unsubscribe(qpResumedSubId);
       qpResumedSubId = VMCI_INVALID_ID;
-   }
-
-   if (ctxUpdatedSubId != VMCI_INVALID_ID) {
-      vmci_event_unsubscribe(ctxUpdatedSubId);
-      ctxUpdatedSubId = VMCI_INVALID_ID;
    }
 
    vmci_device_release(NULL);
