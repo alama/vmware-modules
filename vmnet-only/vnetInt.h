@@ -151,6 +151,7 @@ struct VNetJack {
 struct VNetPort {
    VNetJack    jack;     // must be first
    unsigned    id;
+   unsigned    hubNum;
    uint32      flags;
    uint8       paddr[ETH_ALEN];
    uint8       ladrf[VNET_LADRF_LEN];
