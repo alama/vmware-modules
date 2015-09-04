@@ -1,5 +1,5 @@
 /*********************************************************
- * Copyright (C) 2007-2013 VMware, Inc. All rights reserved.
+ * Copyright (C) 2007-2014 VMware, Inc. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License as published by the
@@ -111,8 +111,13 @@ typedef struct Assert_Info {
    Assert_MonSrcLoc loc;
 } Assert_Info;
 
+/*
+ * The portion of the __attribute__ line after __FILE__ is there so that
+ * the .assert_pathname_* sections are not marked as ALLOC, since we only
+ * need them in the vmx and do not need them loaded.
+ */
 #define __VMM__FILE__SECTION \
-      __attribute__((section (".assert_pathname_" __FILE__)))
+      __attribute__((section (".assert_pathname_" __FILE__ ",\"\"#")))
 #define __VMM__FILE__ ({                                                \
          static __VMM__FILE__SECTION const char file[] = "";            \
          file;                                                          \
@@ -150,12 +155,14 @@ extern const char __vmm_pathnames_start;
  * used by the VMX to look up the information associated with
  * a particular assertion failure.
  *
- * An assertion fires by raising #UD with a ud2/ud1 instruction.  For
- * assertions which always result in a terminal user RPC, we use
+ * Assertion failures are fired by executing a ud2 instruction.
+ *
+ * For assertions which always result in a terminal user RPC, we use
  * __builtin_trap to generate the ud2, so that gcc knows that the
- * subsequent code is unreachable.  For assertions which are recoverable
- * (e.g any assertion triggered on the BackToHost path), we generate the
- * ud2 manually, so that gcc will treat the subsequent code as reachable.
+ * subsequent code is unreachable.  For assertions which are
+ * recoverable (e.g any assertion triggered on the BackToHost path),
+ * we generate the ud2 manually, so that gcc will treat the subsequent
+ * code as reachable.
  *
  * The memory barriers work around a gcc bug that results from having
  * to continue past an assertion.  Without these barriers, gcc has been

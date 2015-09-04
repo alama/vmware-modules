@@ -39,7 +39,6 @@ uint32 CPUID_GetVersion(void);
 Bool CPUID_SyscallSupported(void);
 Bool CPUID_LongModeSupported(void);
 Bool CPUID_AddressSizeSupported(void);
-Bool CPUID_HypervisorCPUIDSig(uint32 *name);
 
 static INLINE uint32 
 CPUID_GetFeatures(void)

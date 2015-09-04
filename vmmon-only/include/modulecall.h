@@ -1,5 +1,5 @@
 /*********************************************************
- * Copyright (C) 1998-2014 VMware, Inc. All rights reserved.
+ * Copyright (C) 1998-2015 VMware, Inc. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License as published by the
@@ -79,9 +79,6 @@ typedef enum ModuleCallType {
    MODULECALL_LAST                   // Number of entries. Must be the last one
 } ModuleCallType;
 
-#define MODULECALL_CROSS_PAGE_LEN    1
-#define MODULECALL_CROSS_PAGE_START  6
-
 #define MODULECALL_USERCALL_NONE     300
 
 /*
@@ -146,6 +143,7 @@ struct SwitchNMIOffsets {
    uint16         db;    // offset to start of  #DB handler
    uint16         nmi;   // offset to start of #NMI handler
    uint16         df;    // offset to start of  #DF handler
+   uint16         ud;    // offset to start of  #UD handler
    uint16         gp;    // offset to start of  #GP handler
    uint16         pf;    // offset to start of  #PF handler
    uint16         mce;   // offset to start of #MCE handler
@@ -162,10 +160,13 @@ typedef
 #include "vmware_pack_begin.h"
 struct SwitchNMI {                                // see switchNMI.S
    uint16           switchNMISize;
-   SwitchNMIOffsets host64;                       // offsets to 64-bit handlers
+   SwitchNMIOffsets host;                         // offsets to handlers
    volatile Bool    wsException[NUM_EXCEPTIONS];  // EXC_DE ... EXC_XF
                                                   // TRUE -> fault occurred in
                                                   //   worldswitch
+   uint64           wsUD2;                        // IP of ud2 instruction
+                                                  //    0ULL == unset
+                                                  //   other == worldswitch IP
    uint8            codeBlock[768];               // Enough for
                                                   //   max('.switchNMI',
                                                   //       '.switchNMILog').
@@ -190,11 +191,14 @@ SwitchNMI;
 
 /*----------------------------------------------------------------------
  *
- * WS_NMI_STRESS
+ * WS_INTR_STRESS
  *
- *   When set to non-zero, this causes the NMI-safe worldswitch code
- *   to be automatically stress tested by simulating NMIs arriving
- *   between various instructions.
+ *   When set to non-zero, world switch code will enable single-step
+ *   debugging across much of the switch path in both directions.  The
+ *   #DB handler detects single-stepping and induces a simulated NMI per
+ *   instruction.  This verifies that interrupts and exceptions are safe
+ *   across the switch path, even if an NMI were raised during handling
+ *   of another exception.
  *
  *   When set to zero, normal worldswitch operation occurs.
  *
@@ -202,7 +206,7 @@ SwitchNMI;
  *
  *----------------------------------------------------------------------
  */
-#define WS_NMI_STRESS 0
+#define WS_INTR_STRESS 0
 
 
 /*----------------------------------------------------------------------
@@ -281,10 +285,20 @@ typedef
 #include "vmware_pack_begin.h"
 struct VMCrossPageData {
    /*
-    * Tiny stack that is used during switching so it can remain valid.
-    * It's good to keep the end 16-byte aligned for 64-bit processors.
-    * There must be enough room for two interrupt frames (in case of
-    * NMI during #DB handling), plus a half dozen registers.
+    * A tiny stack upon which interrupt and exception handlers in the switch
+    * path temporarily run.  Keep the end 16-byte aligned.  This stack must
+    * be large enough for the sum of:
+    *
+    * - 1 #DB exception frame (5 * uint64)
+    * - 1 #NMI exception frame (5 * uint64)
+    * - 1 #MCE exception frame (5 * uint64)
+    * - the largest stack use instantaneously possible by #MCE handling code
+    * - the largest stack use instantaneously possible by #NMI handling code
+    * - the largest stack use instantaneously possible by #DB handling code
+    * - one high-water uint32 used to detect stack overflows when debugging
+    * - remaining pad bytes to align to 16 bytes
+    *
+    * 184 bytes is slightly more than enough as of 2015/03/17 -- fjacobs.
     */
    uint32   tinyStack[46];
 
@@ -460,8 +474,8 @@ struct VMCrossPage {
 #include "vmware_pack_end.h"
 VMCrossPage;
 
-#define CROSSPAGE_VERSION_BASE 0xbef /* increment by 1 */
-#define CROSSPAGE_VERSION    ((CROSSPAGE_VERSION_BASE << 1) + WS_NMI_STRESS)
+#define CROSSPAGE_VERSION_BASE 0xbf1 /* increment by 1 */
+#define CROSSPAGE_VERSION    ((CROSSPAGE_VERSION_BASE << 1) + WS_INTR_STRESS)
 
 #if !defined(VMX86_SERVER) && defined(VMM)
 #define CROSS_PAGE  ((VMCrossPage * const) VPN_2_VA(CROSS_PAGE_START))

@@ -299,7 +299,7 @@ PhysTrack_Free(PhysTracker *tracker)
 
 void
 PhysTrack_Add(PhysTracker *tracker, // IN/OUT
-              MPN64 mpn)            // IN: MPN of page to be added
+              MPN mpn)              // IN: MPN of page to be added
 {
    unsigned int p1;
    unsigned int p2;
@@ -352,7 +352,7 @@ PhysTrack_Add(PhysTracker *tracker, // IN/OUT
 
 void
 PhysTrack_Remove(PhysTracker *tracker, // IN/OUT
-                 MPN64 mpn)            // IN: MPN of page to be removed.
+                 MPN mpn)              // IN: MPN of page to be removed.
 {
    unsigned int p1;
    unsigned int p2;
@@ -402,7 +402,7 @@ PhysTrack_Remove(PhysTracker *tracker, // IN/OUT
 
 Bool
 PhysTrack_Test(const PhysTracker *tracker, // IN
-               MPN64 mpn)                  // IN: MPN of page to be tested.
+               MPN mpn)                    // IN: MPN of page to be tested.
 {
    unsigned int p1;
    unsigned int p2;
@@ -448,9 +448,9 @@ PhysTrack_Test(const PhysTracker *tracker, // IN
  *----------------------------------------------------------------------
  */
 
-MPN64
+MPN
 PhysTrack_GetNext(const PhysTracker *tracker, // IN
-                  MPN64 mpn)                  // IN: MPN of page to be tracked.
+                  MPN mpn)                    // IN: MPN of page to be tracked.
 {
    unsigned int p1;
    unsigned int p2;

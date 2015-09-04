@@ -1,5 +1,5 @@
 /*********************************************************
- * Copyright (C) 1998-2014 VMware, Inc. All rights reserved.
+ * Copyright (C) 1998-2015 VMware, Inc. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License as published by the
@@ -902,31 +902,6 @@ Vmx86_InitVM(VMDriver *vm,          // IN
 /*
  *----------------------------------------------------------------------
  *
- * Vmx86_LateInitVM --
- *
- *      Do late initialization of the driver.
- *	This should be called after Vmx86_CreateVM and
- *	after all the user-level device initialization.
- *
- * Results:
- *	non-zero on error, zero on success;
- *
- * Side effects:
- *      None.
- *
- *----------------------------------------------------------------------
- */
-
-int
-Vmx86_LateInitVM(VMDriver *vm)  // IN:
-{
-   return 0;
-}
-
-
-/*
- *----------------------------------------------------------------------
- *
  * Vmx86_ReadTSCAndUptime --
  *
  *      Atomically read the TSC and the uptime.
@@ -953,6 +928,50 @@ Vmx86_ReadTSCAndUptime(VmTimeStart *st)	// OUT: return value
    st->time = HostIF_ReadUptime();
 
    RESTORE_FLAGS(flags);
+}
+
+
+/*
+ *----------------------------------------------------------------------
+ *
+ * Vmx86_ComputekHz --
+ *
+ *      Given aggregate cycles and system uptime, computes cycle rate as,
+ *
+ *      khz = cycles / (uptime / HostIF_UptimeFrequency()) / 1000
+ *
+ *      We need to do the computation carefully to avoid overflow or
+ *      undue loss of precision.  Also, on Linux we can't do a
+ *      64/64=64 bit division directly, as the gcc stub for that
+ *      is not linked into the kernel.
+ *
+ * Results:
+ *      Returns the computed khz value, or 0 if uptime == 0.
+ *
+ * Side effects:
+ *      none
+ *
+ *----------------------------------------------------------------------
+ */
+
+uint32
+Vmx86_ComputekHz(uint64 cycles, uint64 uptime)
+{
+   uint64 hz;
+   uint64 freq;
+
+   freq = HostIF_UptimeFrequency();
+   while (cycles > MAX_UINT64 / freq) {
+      cycles >>= 1;
+      uptime >>= 1;
+   }
+ 
+   if (uptime == 0) {
+      return 0;
+   }
+
+   hz  = (cycles * freq) / uptime;
+   return (uint32) ((hz + 500) / 1000);
 }
 
 
@@ -984,8 +1003,6 @@ Vmx86GetBusyKHzEstimate(void)
    static const int CYCLES_PER_ITER = 20000;
    int i;
    uint64 j;
-   uint64 freq;
-   uint64 hz;
    uint64 aggregateCycles = 0;
    uint64 aggregateUptime = 0;
 
@@ -999,14 +1016,8 @@ Vmx86GetBusyKHzEstimate(void)
          aggregateUptime += HostIF_ReadUptime();
       } NO_INTERRUPTS_END();
    }
-   freq = HostIF_UptimeFrequency();
-   while (aggregateCycles > MAX_UINT64 / freq) {
-      aggregateCycles >>= 1;
-      aggregateUptime >>= 1;
-   }
-   hz = aggregateCycles * freq / aggregateUptime;
 
-   return (hz + 500) / 1000;
+   return Vmx86_ComputekHz(aggregateCycles, aggregateUptime);
 }
 #else // ifdef __APPLE__
 
@@ -1027,9 +1038,8 @@ Vmx86GetBusyKHzEstimate(void)
 static INLINE_SINGLE_CALLER uint32
 Vmx86GetkHzEstimate(VmTimeStart *st)	// IN: start time
 {
-   uint64 cDiff, tDiff, freq, hz;
+   uint64 cDiff, tDiff;
    uintptr_t flags;
-   uint32 kHz = 0;
 
    SAVE_FLAGS(flags);
    CLEAR_INTERRUPTS();
@@ -1037,33 +1047,7 @@ Vmx86GetkHzEstimate(VmTimeStart *st)	// IN: start time
    tDiff = HostIF_ReadUptime() - st->time;
    RESTORE_FLAGS(flags);
 
-   if (tDiff == 0) {
-      goto failure;
-   }
-
-   /*
-    * Compute the CPU speed in kHz, which is cDiff / (tDiff /
-    * HostIF_UptimeFrequency()) / 1000.  We need to do the computation
-    * carefully to avoid overflow or undue loss of precision.  Also,
-    * on Linux we can't do a 64/64=64 bit division directly, as the
-    * gcc stub for that is not linked into the kernel.
-    */
-
-   freq = HostIF_UptimeFrequency();
-   while (cDiff > ((uint64) -1) / freq) {
-      cDiff >>= 1;
-      tDiff >>= 1;
-   }
-   hz  = (cDiff * freq) / tDiff;
-   kHz = (uint32) ((hz + 500) / 1000);
-   return kHz;
-
-failure:
-#   if defined(linux)
-   /* If we have some reasonable value, use it... */
-   kHz = cpu_khz;
-#   endif
-   return kHz;
+   return Vmx86_ComputekHz(cDiff, tDiff);
 }
 #endif // ifdef __APPLE__
 
@@ -1233,7 +1217,7 @@ Vmx86_MonTimerIPI(void)
          }
       }
       if (!VCPUSet_IsEmpty(&expiredVCPUs) &&
-          HostIF_IPI(vm, &expiredVCPUs, TRUE) == IPI_BROADCAST) {
+          HostIF_IPI(vm, &expiredVCPUs) == IPI_BROADCAST) {
          // no point in doing a broadcast for more than one VM.
          break;
       }
@@ -1492,7 +1476,7 @@ int
 Vmx86_LockPage(VMDriver *vm,                 // IN: VMDriver
                VA64 uAddr,                   // IN: VA of the page to lock
                Bool allowMultipleMPNsPerVA,  // IN: allow locking many pages with the same VA
-               MPN64 *mpn)                   // OUT
+               MPN *mpn)                     // OUT
 {
    int retval;
 
@@ -1565,7 +1549,7 @@ Vmx86_UnlockPage(VMDriver *vm, // IN
 
 int
 Vmx86_UnlockPageByMPN(VMDriver *vm, // IN: VMDriver
-                      MPN64 mpn,    // IN: the page to unlock
+                      MPN mpn,      // IN: the page to unlock
                       VA64 uAddr)   // IN: optional valid VA for this MPN
 {
    int retval;
@@ -1609,7 +1593,7 @@ Vmx86_UnlockPageByMPN(VMDriver *vm, // IN: VMDriver
 int
 Vmx86_AllocLockedPages(VMDriver *vm,	     // IN: VMDriver
 		       VA64 addr,	     // OUT: VA of an array for
-                                             //      allocated MPN64s.
+                                             //      allocated MPNs.
 		       unsigned numPages,    // IN: number of pages to allocate
 		       Bool kernelMPNBuffer, // IN: is the MPN buffer in kernel
                                              //     or user address space?
@@ -1695,11 +1679,11 @@ Vmx86_FreeLockedPages(VMDriver *vm,	    // IN: VM instance pointer
  *----------------------------------------------------------------------
  */
 
-MPN64
+MPN
 Vmx86_GetNextAnonPage(VMDriver *vm,       // IN: VM instance pointer
-                      MPN64 mpn)          // IN: MPN
+                      MPN mpn)            // IN: MPN
 {
-   MPN64 ret;
+   MPN ret;
 
    HostIF_VMLock(vm, 22);
    ret = HostIF_GetNextAnonPage(vm, mpn);
@@ -1934,7 +1918,7 @@ Vmx86_Admit(VMDriver *curVM,     // IN
    if (curVM->memInfo.admitted) {
       unsigned int allocatedPages, nonpaged;
       signed int pages;
-      MPN64 *mpns;
+      MPN *mpns;
 
       /*
        * More admission control: Get enough memory for the nonpaged portion

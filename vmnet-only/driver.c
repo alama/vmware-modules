@@ -168,7 +168,7 @@ static void VNetKrefRelease(struct kref *kref);
 uint vnet_max_qlen = VNET_MAX_QLEN;
 module_param(vnet_max_qlen, uint, 0);
 MODULE_PARM_DESC(vnet_max_qlen, "Maximum queue length of the vmnet, default is"
-                 " 128, maximum is 1024");
+                 " 1024, maximum is 1024");
 
 /*
  *----------------------------------------------------------------------
@@ -341,7 +341,7 @@ init_module(void)
 
    if (vnet_max_qlen < (VNET_MAX_QLEN >> 1) || vnet_max_qlen > 1024) {
       LOG(0, (KERN_NOTICE "vmnet: Invalid vnet_max_qlen specified, "
-              "vnet_max_qlen is to be set to default value 128.\n"));
+              "vnet_max_qlen is to be set to default value 1024.\n"));
       vnet_max_qlen = VNET_MAX_QLEN;
    }
    return 0;

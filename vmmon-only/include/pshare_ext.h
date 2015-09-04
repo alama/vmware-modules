@@ -1,5 +1,5 @@
 /*********************************************************
- * Copyright (C) 2001 VMware, Inc. All rights reserved.
+ * Copyright (C) 2001,2014 VMware, Inc. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License as published by the
@@ -28,7 +28,6 @@
 #define INCLUDE_ALLOW_USERLEVEL
 
 #define INCLUDE_ALLOW_VMKERNEL
-#define INCLUDE_ALLOW_VMMON
 #define INCLUDE_ALLOW_VMCORE
 #define INCLUDE_ALLOW_MODULE
 #include "includeCheck.h"
@@ -41,22 +40,18 @@
  * constants
  */
 
-#define PSHARE_DEFAULT_SCAN_RATE        (32)
-
 #define PSHARE_PAGELIST_MAX             (PAGELIST_MAX)
-#define PSHARE_PAGELIST_MIN             (8)
 #define PSHARE_P2M_BUFFER_MPNS_MAX      (16)
 #define PSHARE_P2M_BUFFER_MPNS_DEFAULT  (4)
-#define PSHARE_HINT_UPDATES_MAX         (PSHARE_PAGELIST_MAX)
-#define PSHARE_HINT_PAGELIST_MAX        (PSHARE_PAGELIST_MAX)
 #define PSHARE_P2M_BUFFER_SLOTS_PER_MPN (PAGE_SIZE / sizeof(PShare_P2MUpdate))
-#define PSHARE_BACKDOOR_HINTS_MAX       (PAGE_SIZE / sizeof(BPN))
 
 #define PSHARE_POISON_MARKER            (CONST64U(0xAAAAAAAAAAAAAAAA))
 
+#define PSHARE_SALT_UNSET       0
+#define PSHARE_SALT_DEFAULT     1
+
 MY_ASSERTS(PSHARE_EXT,
-           ASSERT_ON_COMPILE(PSHARE_HINT_UPDATES_MAX <= PSHARE_PAGELIST_MAX &&
-                             PSHARE_PAGELIST_MAX <= PAGELIST_MAX);)
+           ASSERT_ON_COMPILE(PSHARE_PAGELIST_MAX <= PAGELIST_MAX);)
 
 /*
  * types
@@ -64,8 +59,6 @@ MY_ASSERTS(PSHARE_EXT,
 
 typedef struct PShare_P2MUpdate {
    BPN     bpn;
-   MPN64   mpn;
+   MPN     mpn;
 } PShare_P2MUpdate;
-
-void BusMemPShare_HandleBackdoor(void);
 #endif

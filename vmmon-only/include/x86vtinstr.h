@@ -1,5 +1,5 @@
 /*********************************************************
- * Copyright (C) 2004-2013 VMware, Inc. All rights reserved.
+ * Copyright (C) 2004-2015 VMware, Inc. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License as published by the
@@ -33,6 +33,8 @@
 #include "vm_basic_types.h"
 #include "x86_basic_defs.h"
 #include "community_source.h"
+
+#define INVALID_VMCS_ADDR    ~0ULL
 
 /*
  * All VMX operations set an exit status in EFLAGS_CF and EFLAGS_ZF.

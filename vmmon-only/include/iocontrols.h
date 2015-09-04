@@ -1,5 +1,5 @@
 /*********************************************************
- * Copyright (C) 1998-2014 VMware, Inc. All rights reserved.
+ * Copyright (C) 1998-2015 VMware, Inc. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License as published by the
@@ -33,17 +33,16 @@
 #define INCLUDE_ALLOW_MODULE
 #include "includeCheck.h"
 
-#include "pshare_ext.h"
+#ifdef VMX86_SERVER
+#error iocontrols.h is for hosted vmmon, do not use on visor
+#endif
+
 #include "basic_initblock.h"
 #include "x86segdescrs.h"
 #include "rateconv.h"
 #include "overheadmem_types.h"
-#include "pcip_defs.h"
-
-#ifndef VMX86_SERVER
+#include "pageLock_defs.h"
 #include "numa_defs.h"
-#endif
-
 
 /*
  *-----------------------------------------------------------------------------
@@ -72,7 +71,7 @@
 static INLINE void *
 VA64ToPtr(VA64 va64) // IN
 {
-#ifdef VM_X86_64
+#ifdef VM_64BIT
    ASSERT_ON_COMPILE(sizeof (void *) == 8);
 #else
    ASSERT_ON_COMPILE(sizeof (void *) == 4);
@@ -134,7 +133,7 @@ PtrToVA64(void const *ptr) // IN
  *
  */
 
-#define VMMON_VERSION           (304 << 16 | 0)
+#define VMMON_VERSION           (308 << 16 | 0)
 #define VMMON_VERSION_MAJOR(v)  ((uint32) (v) >> 16)
 #define VMMON_VERSION_MINOR(v)  ((uint16) (v))
 
@@ -203,12 +202,8 @@ enum IOCTLCmd {
    IOCTLCMD(ALLOC_CROSSGDT),
    IOCTLCMD(INIT_VM),
    IOCTLCMD(INIT_CROSSGDT),
-   IOCTLCMD(LATE_INIT_VM),
    IOCTLCMD(RUN_VM),
    IOCTLCMD(LOOK_UP_MPN),
-#if defined __linux__
-   IOCTLCMD(LOOK_UP_LARGE_MPN),
-#endif
    IOCTLCMD(LOCK_PAGE),
    IOCTLCMD(UNLOCK_PAGE),
    IOCTLCMD(APIC_INIT),
@@ -255,17 +250,7 @@ enum IOCTLCmd {
 #endif
 
 #if defined __linux__ || defined __APPLE__
-   // Not implemented in the main branch.
-   IOCTLCMD(REGISTER_PASSTHROUGH_IO),
-   IOCTLCMD(REGISTER_PASSTHROUGH_IRQ),
-   IOCTLCMD(FREE_PASSTHROUGH_IO),
-   IOCTLCMD(FREE_PASSTHROUGH_IRQ),
-   IOCTLCMD(START_PASSTHROUGH),
-   IOCTLCMD(STOP_PASSTHROUGH),
-   IOCTLCMD(QUERY_PASSTHROUGH),
-
    IOCTLCMD(GET_ALL_CPUID),
-
    IOCTLCMD(GET_KERNEL_CLOCK_RATE),
 #endif
 
@@ -275,7 +260,6 @@ enum IOCTLCmd {
 
 #if defined _WIN32
    IOCTLCMD(FREE_CONTIG_PAGES),
-   IOCTLCMD(BEEP),
    IOCTLCMD(HARD_LIMIT_MONITOR_STATUS),	// Windows 2000 only
    IOCTLCMD(BLUE_SCREEN),	// USE_BLUE_SCREEN only
    IOCTLCMD(CHANGE_HARD_LIMIT),
@@ -338,7 +322,6 @@ enum IOCTLCmd {
 #define IOCTL_VMX86_ALLOC_CROSSGDT      VMIOCTL_BUFFERED(ALLOC_CROSSGDT)
 #define IOCTL_VMX86_INIT_VM             VMIOCTL_BUFFERED(INIT_VM)
 #define IOCTL_VMX86_INIT_CROSSGDT       VMIOCTL_BUFFERED(INIT_CROSSGDT)
-#define IOCTL_VMX86_LATE_INIT_VM        VMIOCTL_BUFFERED(LATE_INIT_VM)
 #define IOCTL_VMX86_RUN_VM              VMIOCTL_NEITHER(RUN_VM)
 #define IOCTL_VMX86_SEND_IPI            VMIOCTL_NEITHER(SEND_IPI)
 #define IOCTL_VMX86_GET_IPI_VECTORS     VMIOCTL_BUFFERED(GET_IPI_VECTORS)
@@ -395,77 +378,6 @@ enum IOCTLCmd {
 
 
 /*
- * Return codes from page locking, unlocking, and MPN lookup.
- * They share an error code space because they call one another
- * internally.
- *
- *    PAGE_LOCK_FAILED              The host refused to lock a page.
- *    PAGE_LOCK_LIMIT_EXCEEDED      We have reached the limit of locked
- *                                  pages for all VMs
- *    PAGE_LOCK_TOUCH_FAILED        Failed to touch page after lock.
- *    PAGE_LOCK_IN_TRANSITION       The page is locked but marked by Windows
- *                                  as nonpresent in CPU PTE and in transition 
- *                                  in Windows PFN.  
- *
- *    PAGE_LOCK_SYS_ERROR           System call error.
- *    PAGE_LOCK_ALREADY_LOCKED      Page already locked.
- *    PAGE_LOCK_MEMTRACKER_ERROR    MemTracker fails.
- *    PAGE_LOCK_PHYSTRACKER_ERROR   PhysTracker fails.
- *    PAGE_LOCK_MDL_ERROR           Mdl error on Windows.
- *
- *    PAGE_UNLOCK_NO_ERROR          Unlock successful (must be 0).
- *    PAGE_UNLOCK_NOT_TRACKED       Not in memtracker.
- *    PAGE_UNLOCK_NO_MPN            Tracked but no MPN.
- *    PAGE_UNLOCK_NOT_LOCKED        Not locked.
- *    PAGE_UNLOCK_TOUCH_FAILED      Failed to touch page.
- *    PAGE_UNLOCK_MISMATCHED_TYPE   Tracked but was locked by different API 
- *
- *    PAGE_LOOKUP_INVALID_ADDR      Consistency checking.
- *    PAGE_LOOKUP_BAD_HIGH_ADDR     Consistency checking.
- *    PAGE_LOOKUP_ZERO_ADDR         Consistency checking.
- *    PAGE_LOOKUP_SMALL_ADDR        Consistency checking.
- *
- * All error values must be negative values less than -4096 to avoid
- * conflicts with errno values on Linux.
- *
- * -- edward
- */
-
-#define PAGE_LOCK_SUCCESS                   0
-#define PAGE_LOCK_FAILED              (-10001)
-#define PAGE_LOCK_LIMIT_EXCEEDED      (-10002)
-#define PAGE_LOCK_TOUCH_FAILED        (-10003)
-#define PAGE_LOCK_IN_TRANSITION       (-10004)
-
-#define PAGE_LOCK_SYS_ERROR           (-10010)
-#define PAGE_LOCK_ALREADY_LOCKED      (-10011)
-#define PAGE_LOCK_MEMTRACKER_ERROR    (-10012)
-#define PAGE_LOCK_PHYSTRACKER_ERROR   (-10013)
-#define PAGE_LOCK_MDL_ERROR           (-10014)
-
-#define PAGE_UNLOCK_SUCCESS                 0
-#define PAGE_UNLOCK_NOT_TRACKED       (-10100)
-#define PAGE_UNLOCK_NO_MPN            (-10101)
-#define PAGE_UNLOCK_NOT_LOCKED        (-10102)
-#define PAGE_UNLOCK_TOUCH_FAILED      (-10103)
-#define PAGE_UNLOCK_MISMATCHED_TYPE   (-10104)
-
-#define PAGE_LOOKUP_SUCCESS                 0
-#define PAGE_LOOKUP_INVALID_ADDR      (-10200)
-#define PAGE_LOOKUP_BAD_HIGH_ADDR     (-10201)
-#define PAGE_LOOKUP_ZERO_ADDR         (-10202)
-#define PAGE_LOOKUP_SMALL_ADDR        (-10203)
-#define PAGE_LOOKUP_SYS_ERROR         (-10204)
-#define PAGE_LOOKUP_NOT_TRACKED          (-10)	// added to another code
-#define PAGE_LOOKUP_NO_MPN               (-20)	// added to another code
-#define PAGE_LOOKUP_NOT_LOCKED           (-30)	// added to another code
-#define PAGE_LOOKUP_NO_VM                (-40)	// added to another code
-
-#define PAGE_LOCK_SOFT_FAILURE(status) (status <= PAGE_LOCK_FAILED && \
-                                        status > PAGE_LOCK_SYS_ERROR)
-
-
-/*
  * Flags sent into APICBASE ioctl
  */
 
@@ -476,7 +388,7 @@ enum IOCTLCmd {
 typedef
 #include "vmware_pack_begin.h"
 struct VMLockPageRet {
-   MPN64 mpn;      // OUT: MPN
+   MPN   mpn;      // OUT: MPN
    int32 status;   // OUT: PAGE_* status code
 }
 #include "vmware_pack_end.h"
@@ -496,15 +408,6 @@ typedef struct VMAPICInfo {
    uint32 flags;
 } VMAPICInfo; 
 
-typedef struct PassthruIntrProxy {
-   uint32 bdf;                              // Bus/device/function tuple
-   PCIPassthru_IntrType intrType;           // Interrupt type
-   PCIPassthru_IntrProxyInfo proxyInfo;     // Information relevant to proxying
-                                            // this type of interrupt
-   uint32 vectorListLength;                 // Number of vectors requested
-   uint8 vectorList[PCIP_MAX_MSIX_VECTORS]; // Requested vectors
-} PassthruIntrProxy;
-
 #define VMX86_DRIVER_VCPUID_OFFSET	1000
 
 
@@ -522,6 +425,13 @@ typedef struct LockedPageLimit {
    uint32 configured;  // user defined maximum pages to lock
    uint32 dynamic;     // authd hardLimitMonitor pages to lock
 } LockedPageLimit;
+
+/*
+ * Sentinel VA for IOCTL_VMX86_SET_MEMORY_PARAMS, indicates
+ * NtQuerySystemInformation should be used to determine the host
+ * LockedPageLimit.
+ */
+#define MEMORY_PARAM_USE_SYSINFO_FOR_LOCKED_PAGE_LIMIT   ((VA64)(int64)-1)
 
 /*
  * Data structures for the GET_MEM_INFO and ADMIT ioctls.
@@ -580,15 +490,15 @@ typedef struct VMMemInfoArgs {
    (sizeof(VMMemInfoArgs) - sizeof(VMMemMgmtInfo) + (numVMs) * sizeof(VMMemMgmtInfo))
 
 typedef struct VMMPNNext {
-   MPN64       inMPN;   // IN
-   MPN64       outMPN;  // OUT
+   MPN         inMPN;   // IN
+   MPN         outMPN;  // OUT
 } VMMPNNext;
 
 typedef struct VMMPNList {
    uint32    mpnCount;   // IN (and OUT on Mac OS)
    Bool      ignoreLimits;
    uint8     _pad[3];
-   VA64      mpn64List;  // IN: User VA of an array of 64-bit MPNs.
+   VA64      mpnList;    // IN: User VA of an array of 64-bit MPNs.
 } VMMPNList;
 
 typedef struct VARange {
@@ -599,12 +509,12 @@ typedef struct VARange {
 } VARange;
 
 typedef struct VMMUnlockPageByMPN {
-   MPN64     mpn;
+   MPN       mpn;
    VA64      uAddr;         /* IN: User VA of the page (optional). */
 } VMMUnlockPageByMPN;
 
 typedef struct VMMReadWritePage {
-   MPN64        mpn;   // IN
+   MPN          mpn;   // IN
    VA64         uAddr; // IN: User VA of a PAGE_SIZE-large buffer.
 } VMMReadWritePage;
 
@@ -651,16 +561,15 @@ typedef struct IPIVectors {
 } IPIVectors;
 
 #endif
- 
+
 /*
- * This struct is passed to IOCTL_VMX86_INIT_CROSSGDT to fill in a crossGDT 
+ * This struct is passed to IOCTL_VMX86_INIT_CROSSGDT to fill in a crossGDT
  * entry.
  */
 typedef struct InitCrossGDT {
    uint32 index;      // index in crossGDT to update (offset / 8)
    Descriptor value;  // value to set the crossGDT entry to
 } InitCrossGDT;
-
 
 #if defined __linux__
 
@@ -699,10 +608,10 @@ typedef struct InitCrossGDT {
  */
 
 typedef struct VMAllocContiguousMem {
-   VA64   mpn64List;// IN: User VA of an array of 64-bit MPNs.
+   VA64   mpnList;  // IN: User VA of an array of 64-bit MPNs.
    uint32 mpnCount; // IN
    uint32 order;    // IN
-   MPN64  maxMPN;   // IN
+   MPN    maxMPN;   // IN
 } VMAllocContiguousMem;
 #elif defined __APPLE__
 #   include "iocontrolsMacos.h"

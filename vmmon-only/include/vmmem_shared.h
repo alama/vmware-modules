@@ -1,5 +1,5 @@
 /*********************************************************
- * Copyright (C) 2000-2014 VMware, Inc. All rights reserved.
+ * Copyright (C) 2000-2015 VMware, Inc. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License as published by the
@@ -50,10 +50,13 @@
 #define VMMEM_GUEST_BREAKCOW      VMMEM_FLAG_BIT(1)
 #define VMMEM_GUEST_LARGE_PAGE    VMMEM_FLAG_BIT(2)
 #define VMMEM_GUEST_CAN_FAIL      VMMEM_FLAG_BIT(3)
-#define VMMEM_GUEST_TRY_ZEROCOW   VMMEM_FLAG_BIT(4)
-#define VMMEM_GUEST_TRY_POISONCOW VMMEM_FLAG_BIT(5)
-#define VMMEM_GUEST_ALL_FLAGS     MASK(6)
-#define VMMEM_GUEST_TRY_COW       (VMMEM_GUEST_TRY_ZEROCOW | \
+#define VMMEM_GUEST_TEST_ZEROCOW  VMMEM_FLAG_BIT(4)
+#define VMMEM_GUEST_TRY_ZEROCOW   VMMEM_FLAG_BIT(5)
+#define VMMEM_GUEST_TRY_POISONCOW VMMEM_FLAG_BIT(6)
+#define VMMEM_GUEST_PREALLOC      VMMEM_FLAG_BIT(7)
+#define VMMEM_GUEST_ALL_FLAGS     MASK(8)
+#define VMMEM_GUEST_TRY_COW       (VMMEM_GUEST_TEST_ZEROCOW | \
+                                   VMMEM_GUEST_TRY_ZEROCOW  | \
                                    VMMEM_GUEST_TRY_POISONCOW)
 
 #define VMMEM_PLATFORM_CHECK_OK           VMMEM_FLAG_BIT(0)
@@ -61,14 +64,13 @@
 #define VMMEM_PLATFORM_COW                VMMEM_FLAG_BIT(2)
 #define VMMEM_PLATFORM_EXPOSED_TO_VMM     VMMEM_FLAG_BIT(3)
 #define VMMEM_PLATFORM_P2M_UPDATE_PENDING VMMEM_FLAG_BIT(4)
-#define VMMEM_PLATFORM_BACKED_LARGE       VMMEM_FLAG_BIT(5)
-#define VMMEM_PLATFORM_TRY_COW_SUCCESS    VMMEM_FLAG_BIT(6)
+#define VMMEM_PLATFORM_TRY_COW_SUCCESS    VMMEM_FLAG_BIT(5)
+#define VMMEM_PLATFORM_DIRTY              VMMEM_FLAG_BIT(6)
+#define VMMEM_PLATFORM_BACKED_LARGE       VMMEM_FLAG_BIT(7)
+#define VMMEM_PLATFORM_LARGE_RETRY        VMMEM_FLAG_BIT(8)
 
-#ifndef VMX86_SERVER
-#define VMMEM_PLATFORM_DIRTY              VMMEM_FLAG_BIT(7)
-#endif
 
-#define MAX_PLATFORM_PAGE_INFO_PAGES  160
+#define MAX_PLATFORM_PAGE_INFO_PAGES  240
 
 /*
  * Structure used to query platform about the page state.
@@ -77,7 +79,7 @@ typedef struct PlatformPageInfoList {
    uint32 numPages;
    uint32 _pad;
    BPN    bpn[MAX_PLATFORM_PAGE_INFO_PAGES];    // bpns to check
-   MPN64  mpn[MAX_PLATFORM_PAGE_INFO_PAGES];    // filled in by host
+   MPN    mpn[MAX_PLATFORM_PAGE_INFO_PAGES];    // filled in by host
    uint8  flags[MAX_PLATFORM_PAGE_INFO_PAGES];  // filled in by host
 } PlatformPageInfoList;
 
@@ -99,38 +101,6 @@ typedef enum VmMemServices_Type {
    VMMEM_SERVICES_TYPE_MAX
 } VmMemServices_Type;
 #define VMMEM_SERVICES_TYPE_INVALID (VMMEM_SERVICES_TYPE_MAX)
-
-#ifdef VMX86_SERVER
-#define VMMEMPERIODIC_DEFS              \
-   MDEF(VMMEMPERIODIC_TYPE_RELIABLEMEM, \
-        AsyncRemap_PickupVmPages,       \
-        BusMemRemap_FilterPages,        \
-        AsyncRemap_CompleteVmPages)     \
-   MDEF(VMMEMPERIODIC_TYPE_PAGERETIRE,  \
-        AsyncRemap_PickupVmPages,       \
-        BusMemRemap_FilterPages,        \
-        AsyncRemap_CompleteVmPages)     \
-   MDEF(VMMEMPERIODIC_TYPE_LPAGE,       \
-        AsyncRemap_PickupVmPages,       \
-        BusMemRemap_FilterPages,        \
-        AsyncRemap_CompleteVmPages)     \
-   MDEF(VMMEMPERIODIC_TYPE_NUMA,        \
-        AsyncRemap_PickupVmPages,       \
-        BusMemRemap_FilterPages,        \
-        AsyncRemap_CompleteVmPages)
-#else
-#define VMMEMPERIODIC_DEFS
-   // MDEF(_type, _selectFn, _filterFn, _completeFn)
-#endif
-
-#define MDEF(_type, _selectFn, _filterFn, _completeFn) _type,
-typedef enum VmMemPeriodic_Type {
-   VMMEMPERIODIC_DEFS
-   VMMEMPERIODIC_TYPE_MAX,
-} VmMemPeriodic_Type;
-#undef MDEF
-
-#define VMMEMPERIODIC_TYPE_INVALID (VMMEMPERIODIC_TYPE_MAX)
 
 void VmMem_DisableLargePageAllocations(void);
 void VmMem_EnableLargePageAllocations(void);

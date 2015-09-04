@@ -81,7 +81,7 @@
 
 /* We support upto 32 adapters with LSP + DHCP + NAT + netif + sniffer */
 #define NUM_JACKS_PER_HUB      68 
-#define VNET_MAX_QLEN          128
+#define VNET_MAX_QLEN          1024
 
 #define VNET_NUM_IPBASED_MACS  64
 #define VNET_MAX_JACK_NAME_LEN 16

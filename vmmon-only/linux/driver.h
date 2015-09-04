@@ -91,7 +91,6 @@ typedef struct VMXLinuxState {
    int major;
    int minor;
    struct miscdevice misc;
-   VmTimeStart startTime;	/* Used to compute kHz estimate */
    char deviceName[VM_DEVICE_NAME_SIZE];
    char buf[LINUXLOG_BUFFER_SIZE];
    VMLinux *head;
@@ -104,9 +103,6 @@ typedef struct VMXLinuxState {
    wait_queue_head_t pollQueue;
 
    struct VMLinux *pollList;
-#ifdef POLLSPINLOCK
-   spinlock_t pollListLock;
-#endif
 
    struct task_struct *fastClockThread;
    struct file *fastClockFile;

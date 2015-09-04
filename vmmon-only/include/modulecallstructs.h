@@ -35,7 +35,6 @@
 #include "includeCheck.h"
 
 #include "vm_basic_types.h"
-#include "x86types.h"
 
 /*
  *      Flags indicating switched MSR status.

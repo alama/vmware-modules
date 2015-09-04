@@ -399,7 +399,7 @@ error:
 MemTrackEntry *
 MemTrack_Add(MemTrack *mt,    // IN
              VPN64 vpn,       // IN
-             MPN64 mpn)       // IN
+             MPN mpn)         // IN
 {
    unsigned idx = mt->numPages;
    unsigned p1, p2, p3;
@@ -491,7 +491,7 @@ MemTrack_LookupVPN(MemTrack *mt, // IN
  */
 MemTrackEntry *
 MemTrack_LookupMPN(MemTrack *mt, // IN
-                   MPN64 mpn)    // IN
+                   MPN mpn)      // IN
 {
    MemTrackEntry *next = *MemTrackHTLookup(&mt->mpnHashTable, mpn);
 

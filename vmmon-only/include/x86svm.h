@@ -1,5 +1,5 @@
 /*********************************************************
- * Copyright (C) 2005-2013 VMware, Inc. All rights reserved.
+ * Copyright (C) 2005-2014 VMware, Inc. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License as published by the
@@ -142,19 +142,21 @@
 #define SVM_VMCB_DEBUGCTL_LBR_ENABLE       (1 << 0)
 
 /* VMCB.clean */
-#define SVM_VMCB_CLEAN_I              0
-#define SVM_VMCB_CLEAN_IOPM           1
-#define SVM_VMCB_CLEAN_ASID           2
-#define SVM_VMCB_CLEAN_TPR            3
-#define SVM_VMCB_CLEAN_NP             4
-#define SVM_VMCB_CLEAN_CRX            5
-#define SVM_VMCB_CLEAN_DRX            6
-#define SVM_VMCB_CLEAN_DT             7
-#define SVM_VMCB_CLEAN_SEG            8
-#define SVM_VMCB_CLEAN_CR2            9
-#define SVM_VMCB_CLEAN_LBR            10
-#define SVM_VMCB_CLEAN_AVIC           11
-#define SVM_VMCB_CLEAN_MASK           ((1 << 12) - 1)
+#define SVMCLEAN       \
+   CLEANBIT(I,    0)   \
+   CLEANBIT(IOPM, 1)   \
+   CLEANBIT(ASID, 2)   \
+   CLEANBIT(TPR,  3)   \
+   CLEANBIT(NP,   4)   \
+   CLEANBIT(CRX,  5)   \
+   CLEANBIT(DRX,  6)   \
+   CLEANBIT(DT,   7)   \
+   CLEANBIT(SEG,  8)   \
+   CLEANBIT(CR2,  9)   \
+   CLEANBIT(LBR,  10)  \
+   CLEANBIT(AVIC, 11)
+
+#define SVM_VMCB_CLEAN_MASK           ((1 << SVM_VMCB_NUM_CLEANBITS) - 1)
 
 /* Segment attribute masks (used for conversion to unpacked format) */
 #define SVM_VMCB_ATTRIB_LOW           0x000000ff
@@ -324,6 +326,15 @@ typedef struct {
 } SLB_Header;
 #pragma pack(pop)
 
+enum {
+#define CLEANBIT(_name, _pos) SVM_VMCB_CLEAN_ ## _name = _pos,
+
+   SVMCLEAN
+   SVM_VMCB_NUM_CLEANBITS
+
+#undef CLEANBIT
+};
+   
 static INLINE uint64
 SVM_ExecCtlBit(uint32 exitCode)
 {

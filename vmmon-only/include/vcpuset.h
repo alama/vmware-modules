@@ -40,25 +40,19 @@
 #include "vcpuid.h"
 #include "vcpuset_types.h"
 
-#if (defined (USER_LEVEL)) || (defined (VMX86_VMX))
-#include "str.h"     /* Str_Snprintf */
-#define VCS_SNPRINTF Str_Snprintf
-#else
-#   ifdef MONITOR_APP
+#if defined VMX86_VMX
+#   include "str.h"     /* Str_Snprintf */
+#   define VCS_SNPRINTF Str_Snprintf
+#elif defined MONITOR_APP
 #   include <stdio.h>   /* libc snprintf */
-#      if (defined (WIN32))
+#   if defined WIN32
 #      define VCS_SNPRINTF _snprintf
-#      else
-#         define VCS_SNPRINTF snprintf
-#      endif
 #   else
-#      if (defined (VMM)) || (defined (VMKERNEL))
-#      include "vm_libc.h" /* vmcore snprintf */
 #      define VCS_SNPRINTF snprintf
-#      else
-                           /* no snprintf */
-#      endif
 #   endif
+#elif defined VMM || defined VMKERNEL
+#   include "vm_libc.h" /* vmcore snprintf */
+#   define VCS_SNPRINTF snprintf
 #endif
 
 #ifdef VMX86_VMX

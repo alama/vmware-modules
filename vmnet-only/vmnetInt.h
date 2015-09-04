@@ -77,7 +77,10 @@
 
 
 extern struct proto vmnet_proto;
-#ifdef VMW_NETDEV_HAS_NET
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 2, 0)
+#   define compat_sk_alloc(_bri, _pri) sk_alloc(&init_net, \
+                                                PF_NETLINK, _pri, &vmnet_proto, 1)
+#elif defined(VMW_NETDEV_HAS_NET)
 #   define compat_sk_alloc(_bri, _pri) sk_alloc(&init_net, \
                                                 PF_NETLINK, _pri, &vmnet_proto)
 #else

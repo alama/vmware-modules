@@ -1,5 +1,5 @@
 /*********************************************************
- * Copyright (C) 1998-2012 VMware, Inc. All rights reserved.
+ * Copyright (C) 1998-2012,2014-2015 VMware, Inc. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License as published by the
@@ -33,6 +33,8 @@
 
 #include "includeCheck.h"
 #include "vm_asm.h"
+#include "x86cpuid_asm.h"
+#include "perfctr_generic.h"
 
 #define PERFCTR_PENTIUM4_NUM_COUNTERS            18
 #define PERFCTR_PENTIUM4_NUM_COUNTERS_WITH_L3    26
@@ -75,6 +77,7 @@
 #define PERFCTR_CPU_INVERT_COUNTER_MASK          0x00800000
 #define PERFCTR_CPU_COUNTER_MASK                 0xff000000
 #define PERFCTR_CPU_COUNTER_MASK_SHIFT           24
+#define PERFCTR_CPU_EVENT_IN_USE                 0x3C /* Unhalted Core cycles */
 
 /*
  * ----------------------------------------------------------------------
@@ -404,38 +407,44 @@
  *
  * ----------------------------------------------------------------------
  */
-#define PERFCTR_CORE_PERFCTR0_ADDR               0x0c1
-#define PERFCTR_CORE_PERFEVTSEL0_ADDR            0x186
-#define PERFCTR_CORE_FIXED_CTR0_ADDR             0x309
-#define PERFCTR_CORE_FIXED_CTR_CTRL_ADDR         0x38d
-#define PERFCTR_CORE_FIXED_CTR_CTRL_PMI_MASK     0x888
-#define PERFCTR_CORE_GLOBAL_STATUS_ADDR          0x38e
-#define PERFCTR_CORE_GLOBAL_CTRL_ADDR            0x38f
-#define PERFCTR_CORE_GLOBAL_OVF_CTRL_ADDR        0x390
-#define PERFCTR_CORE_PERFCTR0_FULL_WIDTH_ADDR    0x4c1
-#define PERFCTR_CORE_GLOBAL_PMC0_ENABLE          0x1
-#define PERFCTR_CORE_GLOBAL_PMC1_ENABLE          0x2
-#define PERFCTR_CORE_GLOBAL_FIXED_ENABLE         0x700000000ULL
-#define PERFCTR_CORE_USER_MODE                   PERFCTR_CPU_USER_MODE
-#define PERFCTR_CORE_KERNEL_MODE                 PERFCTR_CPU_KERNEL_MODE
-#define PERFCTR_CORE_APIC_INTR                   PERFCTR_CPU_APIC_INTR
-#define PERFCTR_CORE_ENABLE                      PERFCTR_CPU_ENABLE
-#define PERFCTR_CORE_ANYTHREAD                   0x00200000
-#define PERFCTR_CORE_IN_TX                       (CONST64U(1) << 32)
-#define PERFCTR_CORE_IN_TXCP                     (CONST64U(1) << 33)
-#define PERFCTR_CORE_SHIFT_BY_UNITMASK(e)        ((e) << 8)
-#define PERFCTR_CORE_FIXED_CTR0_PMC              0x40000000
-#define PERFCTR_CORE_FIXED_CTR1_PMC              0x40000001
-#define PERFCTR_CORE_FIXED_PMI_MASKn(n)          (CONST64U(0x8) << ((n) * 4))
-#define PERFCTR_CORE_FIXED_ANY_MASKn(n)          (CONST64U(0x4) << ((n) * 4))
-#define PERFCTR_CORE_FIXED_KERNEL_MASKn(n)       (CONST64U(0x1) << ((n) * 4))
-#define PERFCTR_CORE_FIXED_USER_MASKn(n)         (CONST64U(0x2) << ((n) * 4))
-#define PERFCTR_CORE_FIXED_ENABLE_MASKn(n)       (CONST64U(0x3) << ((n) * 4))
-#define PERFCTR_CORE_FIXED_MASKn(n)              (CONST64U(0xf) << ((n) * 4))
-#define PERFCTR_CORE_FIXED_SHIFTBYn(n)           ((n) * 4)
-#define PERFCTR_CORE_FIXED_ANYTHREAD             CONST64U(0x00000444)
+#define PERFCTR_CORE_PERFCTR0_ADDR                  0x0c1
+#define PERFCTR_CORE_PERFEVTSEL0_ADDR               0x186
+#define PERFCTR_CORE_FIXED_CTR0_ADDR                0x309
+#define PERFCTR_CORE_FIXED_CTR_CTRL_ADDR            0x38d
+#define PERFCTR_CORE_FIXED_CTR_CTRL_PMI_MASK        0x888
+#define PERFCTR_CORE_GLOBAL_STATUS_ADDR             0x38e
+#define PERFCTR_CORE_GLOBAL_CTRL_ADDR               0x38f
+#define PERFCTR_CORE_GLOBAL_OVF_CTRL_ADDR           0x390
+#define PERFCTR_CORE_GLOBAL_STATUS_RESET_ADDR       0x390
+#define PERFCTR_CORE_GLOBAL_STATUS_SET_ADDR         0x391
+#define PERFCTR_CORE_GLOBAL_UNAVAILABLE_STATUS_ADDR 0x392
+#define PERFCTR_CORE_PERFCTR0_FULL_WIDTH_ADDR       0x4c1
+#define PERFCTR_CORE_GLOBAL_PMC0_ENABLE             0x1
+#define PERFCTR_CORE_GLOBAL_PMC1_ENABLE             0x2
+#define PERFCTR_CORE_GLOBAL_FIXED_ENABLE            0x700000000ULL
+#define PERFCTR_CORE_USER_MODE                      PERFCTR_CPU_USER_MODE
+#define PERFCTR_CORE_KERNEL_MODE                    PERFCTR_CPU_KERNEL_MODE
+#define PERFCTR_CORE_APIC_INTR                      PERFCTR_CPU_APIC_INTR
+#define PERFCTR_CORE_ENABLE                         PERFCTR_CPU_ENABLE
+#define PERFCTR_CORE_ANYTHREAD                      0x00200000
+#define PERFCTR_CORE_IN_TX                          (CONST64U(1) << 32)
+#define PERFCTR_CORE_IN_TXCP                        (CONST64U(1) << 33)
+#define PERFCTR_CORE_SHIFT_BY_UNITMASK(e)           ((e) << 8)
+#define PERFCTR_CORE_FIXED_CTR0_PMC                 0x40000000
+#define PERFCTR_CORE_FIXED_CTR1_PMC                 0x40000001
+#define PERFCTR_CORE_FIXED_PMI_MASKn(n)             (CONST64U(0x8) << ((n) * 4))
+#define PERFCTR_CORE_FIXED_ANY_MASKn(n)             (CONST64U(0x4) << ((n) * 4))
+#define PERFCTR_CORE_FIXED_KERNEL_MASKn(n)          (CONST64U(0x1) << ((n) * 4))
+#define PERFCTR_CORE_FIXED_USER_MASKn(n)            (CONST64U(0x2) << ((n) * 4))
+#define PERFCTR_CORE_FIXED_ENABLE_MASKn(n)          (CONST64U(0x3) << ((n) * 4))
+#define PERFCTR_CORE_FIXED_MASKn(n)                 (CONST64U(0xf) << ((n) * 4))
+#define PERFCTR_CORE_FIXED_SHIFTBYn(n)              ((n) * 4)
+#define PERFCTR_CORE_FIXED_ANYTHREAD                CONST64U(0x00000444)
+#define PERFCTR_CORE_PMI_UNAVAILABLE_IN_USE         (CONST64U(1) << 63)
 // XXX serebrin/dhecht: 1-10-11: Make ANYTHREAD depend on number of fixed PMCs
 
+#define PERFCTR_CORE_GLOBAL_STATUS_CTR_FRZ       (1ULL << 59)
+#define PERFCTR_CORE_GLOBAL_STATUS_ASCI          (1ULL << 60)
 #define PERFCTR_CORE_GLOBAL_STATUS_OVFBUFFER     (1ULL << 62)
 
 /* Architectural event counters */
@@ -609,8 +618,8 @@
 
 
 /*
- * PerfCtr_Counter --
- *      Describes a single hardware performance counter
+ * PerfCtr_Config --
+ *      Describes configuration for a single hardware performance counter
  *
  *      Since this is only used to record general performance counters, we
  *      made the assumption in nmiProfiler.c  that the type is GENERAL and
@@ -636,55 +645,32 @@
  *      On Intel Core architecture:
  *      <to be documented>
  */
-typedef struct {
+typedef struct PerfCtr_Config {
    uint64 escrVal;
    uint32 index;
    uint32 addr;
    uint32 escrAddr;
-   uint32 cccrAddr;
-   uint32 cccrVal;
-   uint32 _pad[1];
-} PerfCtr_Counter;
-
-// contains config for a perfctr event
-typedef struct PerfCtr_Config {
-   PerfCtr_Counter counters[2]; // for hypertwins
-   uint32  resetHi;       
-   uint32  periodMean;     
+   uint32 resetHi;
+   uint32 periodMean;
 
    /*
     * Random number (whose absolute value is capped at
     * periodJitterMask) is used to randomize sampling interval.
     */
    uint32  periodJitterMask;
-   uint32  seed;    // seed is used to compute next random number          
-   uint32  config;
-   uint32  unitMask;
-   uint64  eventSelReg;
-   uint32  eventSel;
-   char    eventName[PERF_EVENT_NAME_LEN];
+   uint32  seed;    // seed is used to compute next random number
+   uint16  config;
    Bool    valid;
-   
+   Bool    pebsEnabled;
 } PerfCtr_Config;
 
-/*
- * Trimmed version of PerfCtr_Config, suitable for sharing
- * between monitor and vmkernel.
- */
-typedef struct PerfCtr_ConfigBasic {
-   PerfCtr_Counter counters[2]; // for hypertwins
-   uint32  resetHi;
-   uint32  periodMean;
-   uint32  periodJitterMask;
-   uint32 _pad1;
-} PerfCtr_ConfigBasic;
 
 /*
  * Program/reprogram event reg(s) associated w/perfctrs & start or stop perfctrs
  */
 static INLINE void
-PerfCtrWriteEvtSel(PerfCtr_Counter *ctr,  // IN: counter to write
-                   uint32 escrVal)        // IN: event register value
+PerfCtrWriteEvtSel(PerfCtr_Config *ctr,  // IN: counter to write
+                   uint32 escrVal)       // IN: event register value
 {
    __SET_MSR(ctr->escrAddr, escrVal);
 }
@@ -694,29 +680,13 @@ PerfCtrWriteEvtSel(PerfCtr_Counter *ctr,  // IN: counter to write
  * Set/reset performance counters to engender desired period before overflow
  */
 static INLINE void
-PerfCtrWriteCounter(PerfCtr_Counter *ctr,   // IN: counter to write
+PerfCtrWriteCounter(PerfCtr_Config *ctr,   // IN: counter to write
                     uint32 valueLo,        // IN: low 32 bits of value to write
                     uint32 valueHi)        // IN: high 32 bits of value to write
 {
    WRMSR(ctr->addr, valueLo, valueHi);
 }
 
-
-/* Reads the current value of the counter and determines if it overflowed, 
- * by checking if bit 39 is 0. The method below is fine for any
- * latency (between counter overflow and interrupt) up to ~25 seconds 
- * on a 20GHz machine, which should keep us happy for a while. 
- * For Athlon, we could check upto bit 47 but in practice, the counter 
- * value would never reach there before an interrupt is triggered.
- */
-static INLINE uint32
-PERFCTR_CHECK_OVERFLOW(int ctr) 
-{
-   uint64 val;
-
-   val = RDPMC(ctr);
-   return (!((uint32)(val >> 39) & 1));
-}
 
 static INLINE uint64
 PerfCtr_SelValidBits(Bool amd)
@@ -756,6 +726,93 @@ static INLINE uint64
 PerfCtr_PgcToOvfValidBits(uint64 pgcValBits)
 {
    return pgcValBits | MASKRANGE64(63, 61);
+}
+
+static INLINE uint64
+PerfCtr_PgcToStsRstValidBits(uint64 pgcValBits)
+{
+   return pgcValBits | (1ULL << 55) | MASKRANGE64(63, 58);
+}
+
+static INLINE uint64
+PerfCtr_PgcToGssValidBits(uint64 pgcValBits)
+{
+   return pgcValBits | (1ULL << 55) | MASKRANGE64(62, 58);
+}
+
+/*
+ *----------------------------------------------------------------------
+ *
+ *  PerfCtr_HypervisorCPUIDSig --
+ *
+ *      Get the hypervisor signature string from CPUID.
+ *
+ * Results:
+ *      TRUE on success FALSE otherwise.
+ *      Unqualified 16 byte nul-terminated hypervisor string which may contain
+ *      garbage.
+ *
+ * Side effects:
+ *      None
+ *
+ *----------------------------------------------------------------------
+ */
+
+static INLINE Bool
+PerfCtr_HypervisorCPUIDSig(CPUIDRegs *name)
+{
+   CPUIDRegs regs;
+
+   __GET_CPUID(1, &regs);
+   if (!CPUID_ISSET(1, ECX, HYPERVISOR, regs.ecx)) {
+      return FALSE;
+   }
+
+   __GET_CPUID(0x40000000, name);
+
+   if (name->eax < 0x40000000) {
+      return FALSE;
+   }
+
+   return TRUE;
+}
+
+/*
+ *----------------------------------------------------------------------
+ *
+ *  PerfCtr_PEBSAvailable --
+ *
+ *      Checks if this CPU is capable of PEBS.
+ *
+ * Results:
+ *      TRUE if PEBS is supported, FALSE otherwise.
+ *
+ * Side effects:
+ *      None
+ *
+ *----------------------------------------------------------------------
+ */
+
+static INLINE Bool
+PerfCtr_PEBSAvailable(void)
+{
+   CPUIDRegs regs;
+   __GET_CPUID(0, &regs);
+   if (CPUID_IsVendorIntel(&regs) &&
+       ((__GET_MSR(MSR_MISC_ENABLE) & MSR_MISC_ENABLE_EMON_AVAILABLE) != 0) &&
+       ((__GET_MSR(MSR_MISC_ENABLE) & MSR_MISC_ENABLE_PEBS_UNAVAILABLE) == 0)) {
+      CPUIDRegs hvendor;
+
+      /*
+       * Hyper-V doesn't support PEBS and may #GP if we try to write the
+       * PEBS enable MSR so always consider PEBS un-available on Hyper-V -
+       * PR 1039970.
+       */
+      return !PerfCtr_HypervisorCPUIDSig(&hvendor) ||
+             !CPUID_IsRawVendor(&hvendor,
+                                CPUID_HYPERV_HYPERVISOR_VENDOR_STRING);
+   }
+   return FALSE; 
 }
 
 /* The following are taken from the Intel Architecture Manual,
@@ -915,41 +972,5 @@ PerfCtr_PgcToOvfValidBits(uint64 pgcValBits)
 #define PENTIUM4_NUM_ESCR_ADDRS                 (PENTIUM4_MAX_ESCR_ADDR - PENTIUM4_MIN_ESCR_ADDR + 1)
 
 /* -------- END INTEL DEFINES ------------------------- */
-
-/*
- * nmiNo      -- vmm peer is not attempting to do nmi profiling this run
- * nmiYes     -- vmm peer is doing nmi profiling and nmis are currently enabled
- * nmiStopped -- vmm peer is doing nmi profiling, but nmis are temporarily
- *               disabled for safety reasons.
- */
-typedef enum {nmiNo = 0, nmiYes, nmiStopped} NMIStatus;
-typedef struct NMIShared { /* shared with vmx and vmkernel */
-   NMIStatus vmmStatus;
-   int32     nmiErrorCode;
-   int32     nmiErrorData;
-   int32     nmiErrorData2;
-} NMIShared;
-
-/*
- * CrossProf: structures for unified profiling of vmm, vmx, and
- * vmkernel.  Per-vcpu.
- */
-
-#define CALLSTACK_CROSSPROF_PAGES 1
-
-typedef struct {
-   /*
-    * This structure is per-vcpu.  The raw data is a packed vector
-    * of MonitorCallStackSample, a variable-length structure.
-    */
-
-   /* raw data - packed vec of MonitorCallStackSample, variable length */
-   uint8  crossProfSampleBuffer[PAGES_2_BYTES(CALLSTACK_CROSSPROF_PAGES)];
-
-   uint32 crossProfSampleBytes;
-   uint32 crossProfNumDroppedSamples; /* For when buffer fills up */
-   Bool   enabled; /* Can be false in stats build if monitor.callstack=FALSE */
-   uint8  _pad[3];
-} CrossProfShared;
 
 #endif // ifndef _X86PERFCTR_H_ 
