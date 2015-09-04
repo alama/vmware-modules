@@ -523,7 +523,14 @@ VNetCopyDatagram(const struct sk_buff *skb,	// IN: skb to copy
       .iov_base = buf,
       .iov_len  = len,
    };
+#if LINUX_VERSION_CODE < KERNEL_VERSION(3, 19, 0)
    return skb_copy_datagram_iovec(skb, 0, &iov, len);
+#else
+   struct iov_iter ioviter;
+
+   iov_iter_init(&ioviter, READ, &iov, 1, len);
+   return skb_copy_datagram_iter(skb, 0, &ioviter, len);
+#endif
 }
 
 
@@ -1142,7 +1149,7 @@ VNetUserIf_Create(VNetPort **ret) // OUT
 
    memset(&userIf->stats, 0, sizeof userIf->stats);
    
-   *ret = (VNetPort*)userIf;
+   *ret = &userIf->port;
    return 0;
 }
 

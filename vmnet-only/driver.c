@@ -44,9 +44,6 @@
 
 #include <linux/proc_fs.h>
 #include <linux/file.h>
-#if defined(__x86_64__) && !defined(HAVE_COMPAT_IOCTL)
-#include <asm/ioctl32.h>
-#endif
 
 #include "vnetInt.h"
 #include "vnetFilter.h"
@@ -112,20 +109,6 @@ DEFINE_MUTEX(vnetStructureMutex);
  */
 static DEFINE_MUTEX(vnetIoctlMutex);
 
-#if defined(VM_X86_64) && !defined(HAVE_COMPAT_IOCTL)
-/*
- * List of ioctl commands we translate 1:1 between 32bit
- * userspace and 64bit kernel.
- *
- * Whole range <VNET_FIRST_CMD, VNET_LAST_CMD> is translated
- * 1:1 in addition to the commands listed below.
- */
-static const unsigned int ioctl32_cmds[] = {
-	SIOCGBRSTATUS, SIOCSPEER, SIOCSPEER2, SIOCSBIND, SIOCGETAPIVERSION2,
-        SIOCSFILTERRULES, SIOCSUSERLISTENER, SIOCSMCASTFILTER, SIOCSPEER3, 0,
-};
-#endif
-
 /*
  * List of known ports. Use vnetStructureMutex for locking.
  */
@@ -151,12 +134,8 @@ static ssize_t  VNetFileOpRead(struct file *filp, char *buf, size_t count,
 			       loff_t *ppos);
 static ssize_t  VNetFileOpWrite(struct file *filp, const char *buf, size_t count,
 			        loff_t *ppos);
-static int  VNetFileOpIoctl(struct inode *inode, struct file *filp,
-                            unsigned int iocmd, unsigned long ioarg);
-#if defined(HAVE_UNLOCKED_IOCTL) || defined(HAVE_COMPAT_IOCTL)
 static long  VNetFileOpUnlockedIoctl(struct file * filp,
                                      unsigned int iocmd, unsigned long ioarg);
-#endif
 
 static struct file_operations vnetFileOps = {
    .owner = THIS_MODULE,
@@ -251,143 +230,6 @@ VNetRegister(int value) // IN: unused
 #define VNetProtoRegister()     0
 #define VNetProtoUnregister()
 
-#endif
-
-#if defined(VM_X86_64) && !defined(HAVE_COMPAT_IOCTL)
-/*
- *----------------------------------------------------------------------
- *
- *  LinuxDriver_Ioctl32_Handler --
- *
- *      Wrapper for allowing 64-bit driver to handle ioctls()
- *      from 32-bit applications.
- *
- * Results:
- *
- *      -ENOTTY, or result of call to VNetFileOpIoctl().
- *
- * Side effects:
- *      None.
- *
- *----------------------------------------------------------------------
- */
-
-static int
-LinuxDriver_Ioctl32_Handler(unsigned int fd,     // IN: (unused)
-			    unsigned int iocmd,  // IN:
-                            unsigned long ioarg, // IN:
-			    struct file * filp)  // IN:
-{
-   int ret = -ENOTTY;
-
-   if (filp && filp->f_op && filp->f_op->ioctl == VNetFileOpIoctl) {
-      ret = VNetFileOpIoctl(filp->f_dentry->d_inode, filp, iocmd, ioarg);
-   }
-   return ret;
-}
-
-
-/*
- *----------------------------------------------------------------------
- *
- *  register_ioctl32_handlers --
- *
- *      Registers LinuxDriver_Ioctl32_Handler as the wrapper for
- *      allowing 64-bit driver to handle ioctls()
- *      from 32-bit applications.
- *
- *      Does nothing on non-64bit systems.
- *
- * Results:
- *
- *      errno (0 on success)
- *
- * Side effects:
- *      None.
- *
- *----------------------------------------------------------------------
- */
-
-static int
-register_ioctl32_handlers(void)
-{
-   int i;
-   int retval;
-
-   for (i = VNET_FIRST_CMD; i <= VNET_LAST_CMD; i++) {
-      retval = register_ioctl32_conversion(i, LinuxDriver_Ioctl32_Handler);
-      if (retval) {
-	 int j;
-         LOG(0, (KERN_WARNING "Fail to register ioctl32 conversion for cmd %d\n", i));
-	 for (j = VNET_FIRST_CMD; j < i; ++j) {
-	    unregister_ioctl32_conversion(j);
-	 }
-         return retval;
-      }
-   }
-   for (i = 0; ioctl32_cmds[i]; i++) {
-      retval = register_ioctl32_conversion(ioctl32_cmds[i], LinuxDriver_Ioctl32_Handler);
-      if (retval) {
-	 int j;
-         LOG(0, (KERN_WARNING "Fail to register ioctl32 conversion for cmd %08X\n",
-	         ioctl32_cmds[i]));
-	 for (j = VNET_FIRST_CMD; j < VNET_LAST_CMD; ++j) {
-	    unregister_ioctl32_conversion(j);
-	 }
-	 for (j = 0; j < i; ++j) {
-	    unregister_ioctl32_conversion(ioctl32_cmds[j]);
-	 }
-         return retval;
-      }
-   }
-   return 0;
-}
-
-
-/*
- *----------------------------------------------------------------------
- *
- *  unregister_ioctl32_handlers --
- *
- *      Unregisters the wrappers we specified for
- *      allowing a 64-bit driver to handle ioctls()
- *      from 32-bit applications.
- *
- *      Does nothing on non-64bit systems.
- *
- * Results:
- *
- *      None.
- *
- * Side effects:
- *      None.
- *
- *----------------------------------------------------------------------
- */
-
-static void
-unregister_ioctl32_handlers(void)
-{
-   int i;
-   int retval;
-
-   for (i = VNET_FIRST_CMD; i <= VNET_LAST_CMD; i++) {
-      retval = unregister_ioctl32_conversion(i);
-      if (retval) {
-         LOG(0, (KERN_WARNING "Fail to unregister ioctl32 conversion for cmd %d\n", i));
-      }
-   }
-   for (i = 0; ioctl32_cmds[i]; i++) {
-      retval = unregister_ioctl32_conversion(ioctl32_cmds[i]);
-      if (retval) {
-         LOG(0, (KERN_WARNING "Fail to unregister ioctl32 conversion for cmd %08X\n",
-		 ioctl32_cmds[i]));
-      }
-   }
-}
-#else
-#define register_ioctl32_handlers() (0)
-#define unregister_ioctl32_handlers() do { } while (0)
 #endif
 
 
@@ -497,11 +339,6 @@ init_module(void)
       goto err_chrdev;
    }
 
-   retval = register_ioctl32_handlers();
-   if (retval) {
-      goto err_ioctl;
-   }
-
    if (vnet_max_qlen < (VNET_MAX_QLEN >> 1) || vnet_max_qlen > 1024) {
       LOG(0, (KERN_NOTICE "vmnet: Invalid vnet_max_qlen specified, "
               "vnet_max_qlen is to be set to default value 128.\n"));
@@ -509,8 +346,6 @@ init_module(void)
    }
    return 0;
 
-err_ioctl:
-   unregister_chrdev(VNET_MAJOR_NUMBER, "vmnet");
 err_chrdev:
    VNetProtoUnregister();
 err_proto:
@@ -541,7 +376,6 @@ err_proto:
 void
 cleanup_module(void)
 {
-   unregister_ioctl32_handlers();
    unregister_chrdev(VNET_MAJOR_NUMBER, "vmnet");
    VNetProtoUnregister();
    VNetProc_Cleanup();
@@ -596,6 +430,7 @@ VNetFileOpOpen(struct inode  *inode, // IN: used to get hub number
    if (retval) {
       return -retval;
    }
+   port->hubNum = hubNum;
 
    /*
     * Allocate and connect to hub.
@@ -786,7 +621,7 @@ VNetFileOpPoll(struct file *filp, // IN:
 /*
  *----------------------------------------------------------------------
  *
- * VNetFileOpIoctl --
+ * VNetFileOpUnlockedIoctl --
  *
  *      The virtual network's ioctl file operation. This is used for
  *      setup of the connection. Currently supported commands are
@@ -829,17 +664,16 @@ VNetFileOpPoll(struct file *filp, // IN:
  *----------------------------------------------------------------------
  */
 
-int
-VNetFileOpIoctl(struct inode   *inode, // IN:
-                struct file    *filp,  // IN:
-                unsigned int    iocmd, // IN:
-                unsigned long   ioarg) // IN:
+long
+VNetFileOpUnlockedIoctl(struct file    *filp,  // IN:
+                        unsigned int    iocmd, // IN:
+                        unsigned long   ioarg) // IN:
 {
    VNetPort *port = (VNetPort*)filp->private_data;
    VNetJack *hubJack = NULL;
    VNetPort *new;
    char name[32];
-   int retval;
+   long retval;
    VNet_SetMacAddrIOCTL macAddr;
    VNet_Bind newNetwork;
    VNet_BridgeParams bridgeParams;
@@ -930,7 +764,7 @@ VNetFileOpIoctl(struct inode   *inode, // IN:
       name[8] = '\0'; /* allow 8-char unterminated string */
 
       mutex_lock(&vnetIoctlMutex);
-      retval = VNetNetIf_Create(name, &new, MINOR(inode->i_rdev));
+      retval = VNetNetIf_Create(name, &new, port->hubNum);
       if (retval == 0) {
          retval = VNetSwitchToDifferentPeer(&port->jack, &new->jack,
                                             TRUE, filp, port, new);
@@ -1158,41 +992,6 @@ VNetFileOpIoctl(struct inode   *inode, // IN:
 }
 
 
-#if defined(HAVE_COMPAT_IOCTL) || defined(HAVE_UNLOCKED_IOCTL)
-/*
- *----------------------------------------------------------------------
- *
- * VNetFileOpUnlockedIoctl --
- *
- *      Wrapper around VNetFileOpIoctl.  See VNetFileOpIoctl for
- *      supported arguments.  Called without big kernel lock held.
- *
- * Results:
- *      On success 0 else errno.
- *
- * Side effects:
- *      None.
- *
- *----------------------------------------------------------------------
- */
-
-static long
-VNetFileOpUnlockedIoctl(struct file    *filp,  // IN:
-                        unsigned int    iocmd, // IN:
-                        unsigned long   ioarg) // IN:
-{
-   struct inode *inode = NULL;
-   long err;
-
-   if (filp && filp->f_dentry) {
-      inode = filp->f_dentry->d_inode;
-   }
-   err = VNetFileOpIoctl(inode, filp, iocmd, ioarg);
-   return err;
-}
-#endif
-
-
 /*
  *----------------------------------------------------------------------
  *
@@ -1274,13 +1073,10 @@ VNetSwitchToDifferentPeer(VNetJack *jack,              // IN: jack whose peer is
       return retval;
    }
 
-   if (newPeerPort != NULL) {
-      VNetAddPortToList(newPeerPort);
-   }
    if (filp != NULL) {
+      newPeerPort->hubNum = jackPort->hubNum;
+      VNetAddPortToList(newPeerPort);
       filp->private_data = newPeerPort;
-   }
-   if (jackPort != NULL) {
       VNetRemovePortFromList(jackPort);
    }
 
