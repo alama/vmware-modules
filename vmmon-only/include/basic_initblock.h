@@ -51,7 +51,7 @@ struct InitBlock {
    VA64   crosspage[MAX_INITBLOCK_CPUS];
    uint32 vmInitFailurePeriod;
    LA64   crossGDTHKLA;
-   MPN64  crossGDTMPNs[5];  // CROSSGDT_NUMPAGES
+   MPN    crossGDTMPNs[5];  // CROSSGDT_NUMPAGES
 }
 #include "vmware_pack_end.h"
 InitBlock;

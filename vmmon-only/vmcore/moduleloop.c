@@ -1,5 +1,5 @@
 /*********************************************************
- * Copyright (C) 1998-2014 VMware, Inc. All rights reserved.
+ * Copyright (C) 1998-2015 VMware, Inc. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License as published by the
@@ -131,7 +131,7 @@ skipTaskSwitch:;
          break;
 
       case MODULECALL_GET_RECYCLED_PAGES: {
-         MPN64 mpns[MODULECALL_NUM_ARGS];
+         MPN mpns[MODULECALL_NUM_ARGS];
          int nPages = MIN((int)crosspage->args[0], MODULECALL_NUM_ARGS);
 
          retval = Vmx86_AllocLockedPages(vm, PtrToVA64(mpns), nPages, TRUE,
@@ -180,16 +180,16 @@ skipTaskSwitch:;
       case MODULECALL_IPI: {
          HostIFIPIMode mode;
          ASSERT_ON_COMPILE(sizeof(VCPUSet) <= sizeof(crosspage->args));
-         mode = HostIF_IPI(vm, (VCPUSet *) &crosspage->args[0], TRUE);
+         mode = HostIF_IPI(vm, (VCPUSet *) &crosspage->args[0]);
          retval = (mode != IPI_NONE);
          break;
       }
 
       case MODULECALL_RELEASE_ANON_PAGES: {
          unsigned count;
-         MPN64 mpns[MODULECALL_NUM_ARGS];
+         MPN mpns[MODULECALL_NUM_ARGS];
          for (count = 0; count < MODULECALL_NUM_ARGS; count++) {
-            mpns[count] = (MPN64)crosspage->args[count];
+            mpns[count] = (MPN)crosspage->args[count];
             if (mpns[count] == INVALID_MPN) {
                break;
             }
@@ -206,7 +206,7 @@ skipTaskSwitch:;
          VA64   uAddr  = (VA64)VPN_2_VA(vpn);
          ASSERT(nPages <= MODULECALL_NUM_ARGS);
          for (i = 0; i < nPages; i++) {
-            MPN64 mpn;
+            MPN mpn;
             HostIF_LookupUserMPN(vm, uAddr + i * PAGE_SIZE, &mpn);
             crosspage->args[i] = mpn;
          }
@@ -214,7 +214,7 @@ skipTaskSwitch:;
       }
 
       case MODULECALL_PIN_MPN: {
-         MPN64 mpn;
+         MPN mpn;
          VPN64 vpn = crosspage->args[0];
          VA64   va = VPN_2_VA(vpn);
          retval = Vmx86_LockPage(vm, va, FALSE, &mpn);

@@ -1,5 +1,5 @@
 /*********************************************************
- * Copyright (C) 2003-2014 VMware, Inc. All rights reserved.
+ * Copyright (C) 2003-2015 VMware, Inc. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License as published by the
@@ -37,53 +37,17 @@
 
 #include "vm_basic_types.h"
 #include "vm_basic_defs.h"
+#include "address_defs.h"
 #include "x86segdescrs.h"
 
 /*
- * Virtual, physical, machine address and page conversion macros
- *
- * XXX These should either go in vm_basic_types.h, where the types
- * are defined, or those definitions should be moved here.
- */
-
-#define VA_2_VPN(_va)  ((_va) >> PAGE_SHIFT)
-#define PTR_2_VPN(_ptr) VA_2_VPN((VA)(_ptr))
-#define VPN_2_VA(_vpn) ((_vpn) << PAGE_SHIFT)
-#define VPN_2_PTR(_vpn) ((void *)VPN_2_VA(_vpn))
-
-/*
- * Notice that we don't cast PA_2_PPN's argument to an unsigned type, because
- * we would lose compile-time checks for pointer operands and byte-sized
- * operands. If you use a signed quantity for _pa, ones may be shifted into the
- * high bits of your ppn.
- */
-
-#define PA_2_PPN(_pa)     ((_pa) >> PAGE_SHIFT)
-#define PPN_2_PA(_ppn)    ((PA)(_ppn) << PAGE_SHIFT)
-
-static INLINE MA    MPN_2_MA(MPN64 mpn)   { return    (MA)mpn << PAGE_SHIFT;  }
-static INLINE MPN64 MA_2_MPN(MA ma)       { return (MPN64)(ma >> PAGE_SHIFT); }
-
-static INLINE IOA   IOPN_2_IOA(IOPN iopn) { return (IOA)(iopn << PAGE_SHIFT); }
-static INLINE IOPN  IOA_2_IOPN(IOA ioa)   { return (IOPN)(ioa >> PAGE_SHIFT); }
-
-/*
- * Types used for PL4 page table in x86_64
+ * Types used for PL4 page table in x86_64 and arm64
  */
 
 typedef uint64 VM_L4E;
 typedef uint64 VM_L3E;
 typedef uint64 VM_L2E;
 typedef uint64 VM_L1E;
-
-
-/*
- * 4 Mb pages
- */
-
-#define VM_LARGE_PAGE_SHIFT  22
-#define VM_LARGE_PAGE_SIZE   (1 << VM_LARGE_PAGE_SHIFT)
-#define VM_LARGE_PAGE_MASK   (VM_LARGE_PAGE_SIZE - 1)
 
 
 /*
@@ -106,22 +70,6 @@ typedef uint64 VM_EPTE;
 /*
  * Registers
  */
-
-typedef  int8    Reg8;
-typedef  int16   Reg16;
-typedef  int32   Reg32;
-typedef  int64   Reg64;
-
-typedef uint8   UReg8;
-typedef uint16  UReg16;
-typedef uint32  UReg32;
-typedef uint64  UReg64;
-
-#if defined(VMM) || defined(COREQUERY) || defined (VMKERNEL) \
-    || defined (VMKBOOT)
-typedef  Reg64  Reg;
-typedef UReg64 UReg;
-#endif
 
 typedef union SharedReg64 {
    Reg8  reg8[2];
@@ -487,5 +435,45 @@ typedef struct DebugControlRegister {
    int len3:2;
    
 } DebugControlRegister;
+
+/*
+ * When an interrupt descriptor has an IST entry programmed, for any raised
+ * interrupt (or fault, or exception), the stack pointer is switched to the top
+ * of a specified stack and the exception frame is pushed.  If another
+ * interrupt is raised with the same IST entry programmed before the first is
+ * handled, the first's context is corrupted and system integrity is
+ * compromised.
+ *
+ * When the monitor binary translates code for a guest, any interrupt must be
+ * taken on a host stack, and thus IST entries are used for all vectors.  The
+ * vmkernel uses a separate stack for #MCE handling, programmed via an IST
+ * entry.  In both cases, the danger of context corruption by successive faults
+ * is real and must be dealt with.
+ *
+ * In handlers for these exceptions, the initial exception frame is copied
+ * further down the stack and the stack pointer updated to point to the copy.
+ * The distance from the top of the stack for the copy is situation-dependent.
+ *
+ * ExcFrame64ForCopy extends x86ExcFrame64 and maintains congruence with the
+ * full x86 exception frame types (VMKFullExcFrame and the monitor's ExcFrame).
+ * Enough space is afforded for a couple of temporary software-pushed registers
+ * to accommodate the stack copy.
+ */
+#pragma pack(push, 1)
+typedef struct ExcFrame64ForCopy {
+   UReg64      r13;                  // Pushed by SW. Used as temp reg.
+   UReg64      r14;                  // Pushed by SW. Used as temp reg.
+   UReg64      r15;                  // Pushed by SW. Pushed by gate.
+   
+   UReg64      errorCode;            // Pushed by SW or HW.
+   
+   UReg64      rip;                  // Pushed by HW.
+   uint16      cs, __csu[3];         // Pushed by HW.
+   uint64      rflags;               // Pushed by HW.
+
+   UReg64      rsp;                  // Pushed by HW.
+   uint16      ss, __ssu[3];         // Pushed by HW.
+} ExcFrame64ForCopy;
+#pragma pack(pop)
 
 #endif // ifndef _X86TYPES_H_

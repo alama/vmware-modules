@@ -1,5 +1,5 @@
 /*********************************************************
- * Copyright (C) 1998-2003 VMware, Inc. All rights reserved.
+ * Copyright (C) 1998-2014 VMware, Inc. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License as published by the
@@ -122,7 +122,7 @@ PTSC_MHz(void)
    return ptscInfo.mHz;
 }
 
-#ifdef VM_X86_64
+#if defined(VM_X86_64) || defined(VM_ARM_64)
 
 /* 
  * Conversions to/from cycles.  Note that the conversions operate on
@@ -170,10 +170,38 @@ int64 PTSC_CyclesToUS(VmRelativeTS ts);
 /*
  * ESX with userworld VMX
  */
-
 #include "x86types.h"
 #include "user_layout.h"
 
+#ifdef VM_ARM_64
+static INLINE VmAbsoluteTS
+PTSC_Get(void)
+{
+   extern __thread User_ThreadData vmkUserTdata;
+
+   register RateConv_Params params;
+   register uint64 pseudoTSC;
+
+   /*
+    * On ARM64 the generic timer guarantees that the counters are synchronous
+    * and independent of CPU frequency.
+    */
+   params = vmkUserTdata.pseudoTSCConv;
+   pseudoTSC = RDTSC();
+
+   /*
+    *  assert that conversion rate is `identity'.
+    * we'll have to revisit that when/if this assumption changes
+    * on some platform
+    */
+   ASSERT((params.mult == 1 && params.shift == 0) ||
+          (params.mult == 0x80000000 && params.shift == 31));
+
+   pseudoTSC += params.add;
+
+   return pseudoTSC;
+}
+#else
 static INLINE VmAbsoluteTS
 PTSC_Get(void)
 {
@@ -187,7 +215,7 @@ PTSC_Get(void)
    ASSERT((int64)ptsc >= 0);
    return ptsc;
 }
-
+#endif
 #else
 
 /*

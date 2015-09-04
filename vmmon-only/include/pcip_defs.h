@@ -1,5 +1,5 @@
 /*********************************************************
- * Copyright (C) 2009 VMware, Inc. All rights reserved.
+ * Copyright (C) 2009-2014 VMware, Inc. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License as published by the
@@ -36,10 +36,16 @@
 
 #include "monitorAction_exported.h"
 
+#include "bitvector.h"
+
 #define MAX_INTERRUPTS                 256 // max interrupts a device could use
-#define PCIP_MAX_MSIX_VECTORS          32
-#define PCIP_VALID_VECTOR_MASK         ((CONST64U(1) << \
- 				       (PCIP_MAX_MSIX_VECTORS + 2)) - 1)
+#define PCIP_MAX_MSIX_VECTORS          128
+#define PCIP_MAX_VECTORS               (PCIP_MAX_MSIX_VECTORS + 2)
+
+typedef struct PCIPVecBV {
+   BitVector bv;
+   uint32 reserved[PCIP_MAX_VECTORS / sizeof (uint32) - 1];
+} PCIPVecBV;
 
 typedef enum PCIPassthruVectorIndex {
    PCIP_INDEX_IOAPIC,

@@ -143,4 +143,14 @@ MonitorAction_SetBits(MonitorActionIntr *actionIntr, MonitorIdemAction actionID)
    return newAction;
 }
 
+/*
+ * C1 states entered by monitor while waiting for an action
+ */
+typedef enum {
+   VMM_C1_STATE_INVALID = 0,
+   VMM_C1_STATE_HLT,
+   VMM_C1_STATE_MWAIT,
+   VMM_C1_STATE_PAUSE
+} vmmC1StateType;
+
 #endif // _MONITORACTION_EXPORTED_H_

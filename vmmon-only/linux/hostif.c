@@ -44,10 +44,6 @@
 
 #include <linux/smp.h>
 
-#ifndef HAVE_UNLOCKED_IOCTL
-#include <linux/smp_lock.h>
-#endif
-
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 25)
 #   include <asm/asm.h>
 #endif
@@ -763,7 +759,7 @@ HostIFHostMemInit(VMDriver *vm)  // IN:
 static void
 HostIFHostMemCleanup(VMDriver *vm)  // IN:
 {
-   MPN64 mpn;
+   MPN mpn;
    VMHost *vmh = vm->vmhost;
 
    if (!vmh) {
@@ -811,12 +807,12 @@ HostIFHostMemCleanup(VMDriver *vm)  // IN:
  *----------------------------------------------------------------------
  */
 
-MPN64
+MPN
 HostIF_AllocMachinePage(void)
 {
   struct page *pg = alloc_page(GFP_HIGHUSER);
 
-  return (pg) ? ((MPN64)page_to_pfn(pg)) : INVALID_MPN;
+  return (pg) ? ((MPN)page_to_pfn(pg)) : INVALID_MPN;
 }
 
 
@@ -839,7 +835,7 @@ HostIF_AllocMachinePage(void)
  */
 
 void
-HostIF_FreeMachinePage(MPN64 mpn)  // IN:
+HostIF_FreeMachinePage(MPN mpn)  // IN:
 {
   struct page *pg = pfn_to_page(mpn);
 
@@ -871,7 +867,7 @@ HostIF_AllocLockedPages(VMDriver *vm,	     // IN: VM instance pointer
 			unsigned numPages,   // IN: number of pages to allocate
 			Bool kernelMPNBuffer)// IN: is the MPN buffer in kernel or user address space?
 {
-   MPN64 *pmpn = VA64ToPtr(addr);
+   MPN *pmpn = VA64ToPtr(addr);
 
    VMHost *vmh = vm->vmhost;
    unsigned int cnt;
@@ -882,14 +878,14 @@ HostIF_AllocLockedPages(VMDriver *vm,	     // IN: VM instance pointer
    }
    for (cnt = 0; cnt < numPages; cnt++) {
       struct page* pg;
-      MPN64 mpn;
+      MPN mpn;
 
       pg = alloc_page(GFP_HIGHUSER);
       if (!pg) {
          err = -ENOMEM;
 	 break;
       }
-      mpn = (MPN64)page_to_pfn(pg);
+      mpn = (MPN)page_to_pfn(pg);
       if (kernelMPNBuffer) {
          *pmpn = mpn;
       } else if (HostIF_CopyToUser(pmpn, &mpn, sizeof *pmpn) != 0) {
@@ -932,11 +928,11 @@ HostIF_FreeLockedPages(VMDriver *vm,	     // IN: VM instance pointer
 		       Bool kernelMPNBuffer) // IN: is the MPN buffer in kernel or user address space?
 {
    const int MPN_BATCH = 64;
-   MPN64 const *pmpn = VA64ToPtr(addr);
+   MPN const *pmpn = VA64ToPtr(addr);
    VMHost *vmh = vm->vmhost;
    unsigned int cnt;
    struct page *pg;
-   MPN64 *mpns;
+   MPN *mpns;
 
    mpns = HostIF_AllocKernelMem(sizeof *mpns * MPN_BATCH, TRUE);
 
@@ -1049,7 +1045,7 @@ HostIF_Init(VMDriver *vm)  // IN:
 int
 HostIF_LookupUserMPN(VMDriver *vm, // IN: VMDriver
                      VA64 uAddr,   // IN: user VA of the page
-                     MPN64 *mpn)   // OUT
+                     MPN *mpn)     // OUT
 {
    void *uvAddr = VA64ToPtr(uAddr);
    int retval = PAGE_LOCK_SUCCESS;
@@ -1174,43 +1170,6 @@ HostIFGetUserPages(void *uvAddr,          // IN
 }
 
 
-#if defined(__linux__) && defined(VMX86_DEVEL)
-/*
- *-----------------------------------------------------------------------------
- *
- * HostIF_LookupLargeMPN --
- *
- *      Gets the first MPN of a hugetlb page.
- *
- * Results:
- *      On success, PAGE_LOCK_SUCCESS and the MPN, else PAGE_LOCK_FAILED on an
- *      error.
- *
- * Side effects:
- *      None.
- *
- *-----------------------------------------------------------------------------
- */
-
-int
-HostIF_LookupLargeMPN(VA64 uAddr,   // IN: user VA of the page
-                      MPN64 *mpn)   // OUT
-{
-   struct page *page;
-   void *uvAddr = VA64ToPtr(uAddr);
-
-   if (HostIFGetUserPages(uvAddr, &page, 1)) {
-      return PAGE_LOCK_FAILED;
-   }
-
-   *mpn = (MPN64)page_to_pfn(page);
-   put_page(page);
-
-   return PAGE_LOCK_SUCCESS;
-}
-#endif
-
-
 /*
  *----------------------------------------------------------------------
  *
@@ -1230,7 +1189,7 @@ HostIF_LookupLargeMPN(VA64 uAddr,   // IN: user VA of the page
 
 Bool
 HostIF_IsLockedByMPN(VMDriver *vm,  // IN:
-                     MPN64 mpn)     // IN:
+                     MPN mpn)       // IN:
 {
   return PhysTrack_Test(vm->vmhost->lockedPages, mpn);
 }
@@ -1257,7 +1216,7 @@ int
 HostIF_LockPage(VMDriver *vm,                // IN: VMDriver
                 VA64 uAddr,                  // IN: user VA of the page
                 Bool allowMultipleMPNsPerVA, // IN: allow to lock many pages per VA
-                MPN64 *mpn)                  // OUT: pinned page
+                MPN *mpn)                    // OUT: pinned page
 {
    void *uvAddr = VA64ToPtr(uAddr);
    struct page *page;
@@ -1281,7 +1240,7 @@ HostIF_LockPage(VMDriver *vm,                // IN: VMDriver
       return PAGE_LOCK_FAILED;
    }
 
-   *mpn = (MPN64)page_to_pfn(page);
+   *mpn = (MPN)page_to_pfn(page);
 
    if (allowMultipleMPNsPerVA) {
       /*
@@ -1377,7 +1336,7 @@ HostIF_UnlockPage(VMDriver *vm,  // IN:
 
 int
 HostIF_UnlockPageByMPN(VMDriver *vm, // IN: VMDriver
-                       MPN64 mpn,    // IN: the MPN to unlock
+                       MPN mpn,      // IN: the MPN to unlock
                        VA64 uAddr)   // IN: optional(debugging) VA for the MPN
 {
    if (!PhysTrack_Test(vm->vmhost->lockedPages, mpn)) {
@@ -1395,7 +1354,7 @@ HostIF_UnlockPageByMPN(VMDriver *vm, // IN: VMDriver
        */
 
       if (va != NULL) {
-         MPN64 lookupMpn = PgtblVa2MPN((VA)va);
+         MPN lookupMpn = PgtblVa2MPN((VA)va);
 
          if (lookupMpn != INVALID_MPN && mpn != lookupMpn) {
             Warning("Page lookup fail %#"FMT64"x %016" FMT64 "x %p\n",
@@ -2069,10 +2028,10 @@ HostIF_MapCrossPage(VMDriver *vm, // IN
 
 void *
 HostIF_AllocCrossGDT(uint32 numPages,     // IN: Number of pages
-                     MPN64 maxValidFirst, // IN: Highest valid MPN of first page
-                     MPN64 *crossGDTMPNs) // OUT: Array of MPNs
+                     MPN maxValidFirst,   // IN: Highest valid MPN of first page
+                     MPN *crossGDTMPNs)   // OUT: Array of MPNs
 {
-   MPN64 startMPN;
+   MPN startMPN;
    struct page *pages;
    uint32 i;
    void *crossGDT;
@@ -2682,9 +2641,7 @@ LinuxDriverIPIHandler(void *info)
  * HostIF_IPI --
  *
  *    If the passed VCPU threads are on some CPUs in the system,
- *    attempt to hit them with an IPI.  If "all" is true, the caller
- *    wants us to hit them all; if not, hitting at least one is
- *    sufficient.
+ *    attempt to hit them with an IPI.
  *
  *    On older Linux systems we do a broadcast.
  *
@@ -2696,8 +2653,7 @@ LinuxDriverIPIHandler(void *info)
 
 HostIFIPIMode
 HostIF_IPI(VMDriver *vm,                // IN:
-           const VCPUSet *ipiTargets,   // IN:
-           Bool all)                    // IN:
+           const VCPUSet *ipiTargets)   // IN:
 {
    HostIFIPIMode mode = IPI_NONE;
 
@@ -2717,9 +2673,6 @@ HostIF_IPI(VMDriver *vm,                // IN:
          /* Newer kernels have (async) IPI targetting */
          arch_send_call_function_single_ipi(targetHostCpu);
 	 mode = IPI_UNICAST;
-         if (!all) {
-	    break;
-         }
 #endif
       }
    } ROF_EACH_VCPU_IN_SET();
@@ -2869,7 +2822,7 @@ HostIF_CallOnEachCPU(void (*func)(void*), // IN: function to call
  */
 
 int
-HostIF_ReadPage(MPN64 mpn,           // MPN of the page
+HostIF_ReadPage(MPN mpn,             // MPN of the page
                 VA64 addr,           // buffer for data
                 Bool kernelBuffer)   // is the buffer in kernel space?
 {
@@ -2918,7 +2871,7 @@ HostIF_ReadPage(MPN64 mpn,           // MPN of the page
  */
 
 int
-HostIF_WritePage(MPN64 mpn,            // MPN of the page
+HostIF_WritePage(MPN mpn,              // MPN of the page
                  VA64 addr,            // data to write to the page
                  Bool kernelBuffer)    // is the buffer in kernel space?
 {
@@ -2971,8 +2924,8 @@ HostIF_GetLockedPageList(VMDriver* vm,          // IN: VM instance pointer
                          VA64 uAddr,            // OUT: user mode buffer for MPNs
                          unsigned int numPages) // IN: size of the buffer in MPNs
 {
-   MPN64 *mpns = VA64ToPtr(uAddr);
-   MPN64 mpn;
+   MPN *mpns = VA64ToPtr(uAddr);
+   MPN mpn;
    unsigned count;
 
    struct PhysTracker* AWEPages;
@@ -3010,8 +2963,8 @@ HostIF_GetLockedPageList(VMDriver* vm,          // IN: VM instance pointer
  *-----------------------------------------------------------------------------
  */
 
-MPN64
-HostIF_GetNextAnonPage(VMDriver *vm, MPN64 inMPN)
+MPN
+HostIF_GetNextAnonPage(VMDriver *vm, MPN inMPN)
 {
    if (!vm->vmhost || !vm->vmhost->AWEPages) {
       return INVALID_MPN;
@@ -3160,21 +3113,9 @@ HostIFDoIoctl(struct file *filp,
               u_int iocmd,
               unsigned long ioarg)
 {
-#ifdef HAVE_UNLOCKED_IOCTL
    if (filp->f_op->unlocked_ioctl) {
       return filp->f_op->unlocked_ioctl(filp, iocmd, ioarg);
    }
-#else
-   if (filp->f_op->ioctl) {
-      long err;
-
-      lock_kernel();
-      err = filp->f_op->ioctl(filp->f_dentry->d_inode, filp, iocmd, ioarg);
-      unlock_kernel();
-
-      return err;
-   }
-#endif
    return -ENOIOCTLCMD;
 }
 #endif //VMON_USE_HIGH_RES_TIMERS

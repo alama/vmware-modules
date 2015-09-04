@@ -1,5 +1,5 @@
 /*********************************************************
- * Copyright (C) 2009 VMware, Inc. All rights reserved.
+ * Copyright (C) 2009-2014 VMware, Inc. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License as published by the
@@ -24,10 +24,6 @@
 
 #ifndef _HOSTIF_PRIV_H_
 #define _HOSTIF_PRIV_H_
-
-#if defined(VMX86_DEVEL)
-EXTERN int    HostIF_LookupLargeMPN(VA64 uAddr, MPN64 *mpn);
-#endif
 
 /* Functions for transferring data to/from userspace. */
 EXTERN int    HostIF_CopyFromUser(void *dst, const void *src, unsigned int len);

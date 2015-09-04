@@ -1,5 +1,5 @@
 /*********************************************************
- * Copyright (C) 1998 VMware, Inc. All rights reserved.
+ * Copyright (C) 1998-2014 VMware, Inc. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License as published by the
@@ -26,6 +26,7 @@
 #define _VM_ASM_X86_64_H_
 
 
+#define INCLUDE_ALLOW_VMX
 #define INCLUDE_ALLOW_MODULE
 #define INCLUDE_ALLOW_VMCORE
 #define INCLUDE_ALLOW_VMMON

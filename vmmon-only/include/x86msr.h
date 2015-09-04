@@ -1,5 +1,5 @@
 /*********************************************************
- * Copyright (C) 1998-2013 VMware, Inc. All rights reserved.
+ * Copyright (C) 1998-2015 VMware, Inc. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License as published by the
@@ -240,6 +240,7 @@ typedef enum {
 #define MSR_X2APIC_DIVIDER   0x0000083e
 #define MSR_X2APIC_SELFIPI   0x0000083f
 
+
 /* MSR_CR_PAT power-on value */
 #define MSR_CR_PAT_DEFAULT   0x0007040600070406ULL
 
@@ -276,6 +277,7 @@ typedef enum {
 #define MSR_FEATCTL_LOCK     0x00000001
 #define MSR_FEATCTL_SMXE     0x00000002
 #define MSR_FEATCTL_VMXE     0x00000004
+#define MSR_FEATCTL_SGXE     0x00040000
 
 /* MSR_EFER bits. */
 #define MSR_EFER_SCE         0x0000000000000001ULL  /* Sys call ext'ns:  r/w */

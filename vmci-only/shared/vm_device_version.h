@@ -1,5 +1,5 @@
 /*********************************************************
- * Copyright (C) 1998 VMware, Inc. All rights reserved.
+ * Copyright (C) 1998,2005-2012,2014-2015 VMware, Inc. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License as published by the
@@ -90,6 +90,9 @@
 
 #define PCI_DEVICE_ID_VMWARE_DUMMY      0x0809
 
+#define PCI_DEVICE_ID_VMWARE_NVDIMM     0x0810
+#define PCI_DEVICE_ID_VMWARE_VRDMA      0x0820
+
 /*
  * VMware Virtual Device Test Infrastructure (VDTI) devices
  */
@@ -115,7 +118,7 @@
  *    Intel 82545EM (e1000, server adapter, single port)
  *    Intel 82546EB (e1000, server adapter, dual port)
  *    Intel HECI (as embedded in ich9m)
- *    Intel XHCI (as embedded in PANTHERPOINT)
+ *    Intel XHCI (Panther Point / Intel 7 Series)
  */
 #define PCI_VENDOR_ID_INTEL             0x8086
 #define PCI_DEVICE_ID_INTEL_82439TX     0x7100
@@ -132,6 +135,11 @@
 #define PCI_DEVICE_ID_INTEL_82574_APPLE 0x10f6
 #define PCI_DEVICE_ID_INTEL_HECI        0x2a74
 #define PCI_DEVICE_ID_INTEL_PANTHERPOINT_XHCI 0x1e31
+
+/* From drivers/usb/host/xhci-pci.c:
+ *    Intel XHCI (Lynx Point / Intel 8 Series)
+ */
+#define PCI_DEVICE_ID_INTEL_LYNXPOINT_XHCI 0x8c31
 
 #define E1000E_PCI_DEVICE_ID_CONFIG_STR "e1000e.pci.deviceID"
 #define E1000E_PCI_SUB_VENDOR_ID_CONFIG_STR "e1000e.pci.subVendorID"
@@ -202,6 +210,17 @@
 #define AHCI_MAX_PORTS SATA_MAX_DEVICES
 
 /*
+ * Maximum number of supported disk in a VM.
+ *
+ * Note: With some config options for PVSCSI, maximum number of disks could
+ * be ~1K but that number is not publicly supported yet.
+ */
+#define MAX_NUM_DISKS \
+   ((SATA_MAX_CONTROLLERS * SATA_MAX_DEVICES) + \
+    (SCSI_MAX_CONTROLLERS * SCSI_MAX_DEVICES) + \
+    (IDE_NUM_INTERFACES * IDE_DRIVES_PER_IF))
+
+/*
  * VSCSI_BV_INTS is the number of uint32's needed for a bit vector
  * to cover all scsi devices per target.
  */
@@ -243,6 +262,12 @@
 
 /************* USB implementation limits ********************************/
 #define MAX_USB_DEVICES_PER_HOST_CONTROLLER 127
+
+/************* NVDIMM implementation limits ********************************/
+#define MAX_NVDIMM 64
+
+/************* vRDMA implementation limits ******************************/
+#define MAX_VRDMA_DEVICES 2
 
 /************* Strings for Host USB Driver *******************************/
 

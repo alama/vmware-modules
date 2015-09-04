@@ -40,10 +40,10 @@ struct VMDriver;
 EXTERN struct PhysTracker *PhysTrack_Alloc(struct VMDriver *vm);
 EXTERN void PhysTrack_Free(struct PhysTracker *);
 
-EXTERN void PhysTrack_Add(struct PhysTracker *, MPN64);
-EXTERN void PhysTrack_Remove(struct PhysTracker *, MPN64);
-EXTERN Bool PhysTrack_Test(const struct PhysTracker *, MPN64);
-EXTERN MPN64 PhysTrack_GetNext(const struct PhysTracker *, MPN64);
+EXTERN void PhysTrack_Add(struct PhysTracker *, MPN);
+EXTERN void PhysTrack_Remove(struct PhysTracker *, MPN);
+EXTERN Bool PhysTrack_Test(const struct PhysTracker *, MPN);
+EXTERN MPN PhysTrack_GetNext(const struct PhysTracker *, MPN);
 
 #endif
 

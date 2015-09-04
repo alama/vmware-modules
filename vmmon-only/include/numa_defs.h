@@ -57,29 +57,16 @@ typedef uint8  NUMA_MemRangeID;
  * Structures
  */
 typedef struct {
-   MPN64        startMPN;
-   MPN64        endMPN;
+   MPN          startMPN;
+   MPN          endMPN;
    NUMA_Node    id;
    Bool         isReliable;
+   Bool         isVolatile;
 } NUMA_MemRange;
 
 typedef struct NUMA_MemRangesList {
    uint64        numMemRanges;
    NUMA_MemRange memRange[NUMA_MAX_MEM_RANGES];
 } NUMA_MemRangesList;
-
-/*
- * VMkernel's version of NUMA_NodeInfo is
- * defined in vmkernel/hardware/numa_int.h.
- */
-#ifndef VMX86_SERVER
-typedef struct {
-   uint32        numPCPUs;
-   uint32        numMemRanges;
-   NUMA_Node     id;
-   uint32        apicIDs[NUMA_MAX_CPUS_PER_NODE];
-   NUMA_MemRange memRange[NUMA_MAX_MEM_RANGES];
-} NUMA_NodeInfo;
-#endif
 
 #endif // _NUMA_DEFS_H

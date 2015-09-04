@@ -129,7 +129,8 @@ VNetHubFindHubByID(uint8 idNum[VNET_PVN_ID_LEN]) // IN: PVN id to find
 {
    VNetHub *currHub = vnetHub;
    while (currHub && (currHub->hubType != HUB_TYPE_PVN ||
-		      memcmp(idNum, currHub->id.pvnID, sizeof currHub->id.pvnID))) {
+                      memcmp(idNum, currHub->id.pvnID,
+                             sizeof currHub->id.pvnID))) {
       currHub = currHub->next;
    }
    return currHub;
@@ -312,7 +313,7 @@ VNetHubAlloc(Bool allocPvn, // IN: TRUE for PVN, FALSE for vnet
 
       if (allocPvn) {
 	 hub->hubType = HUB_TYPE_PVN;
-	 memcpy(hub->id.pvnID, id, sizeof hub->id.pvnID);
+         memcpy(hub->id.pvnID, id, sizeof hub->id.pvnID);
 	 ++pvnInstance;
       } else {
 	 hub->hubType = HUB_TYPE_VNET;

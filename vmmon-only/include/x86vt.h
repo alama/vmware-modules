@@ -1,5 +1,5 @@
 /*********************************************************
- * Copyright (C) 2004-2014 VMware, Inc. All rights reserved.
+ * Copyright (C) 2004-2015 VMware, Inc. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License as published by the
@@ -94,6 +94,8 @@
    (CONST64U(1) << MSR_VMX_MISC_RDMSR_SMBASE_IN_SMM_SHIFT)
 #define MSR_VMX_MISC_ALLOW_ALL_VMWRITES         \
    (CONST64U(1) << MSR_VMX_MISC_ALLOW_ALL_VMWRITES_SHIFT)
+#define MSR_VMX_MISC_ZERO_VMENTRY_INSTLEN         \
+   (CONST64U(1) << MSR_VMX_MISC_ZERO_VMENTRY_INSTLEN_SHIFT)
 
 
 #define MSR_VMX_EPT_VPID_EPTE_X                 \
@@ -152,190 +154,11 @@
 #define VT_ENCODING_NUM_SIZES                   4
 #define VT_ENCODING_RSVD               0xffff9000
 
-/*
- * VMCS encodings; volume 3B Appendix H. These are the values passed to
- * VMWrite and VMRead.
- */
-
-/* 16-bit control field. */
-#define VT_VMCS_VPID                   0x00000000
-#define VT_VMCS_PI_NOTIFY              0x00000002
-#define VT_VMCS_EPTP_INDEX             0x00000004
-
-/* 16-bit guest state. */
-#define VT_VMCS_ES                     0x00000800
-#define VT_VMCS_CS                     0x00000802
-#define VT_VMCS_SS                     0x00000804
-#define VT_VMCS_DS                     0x00000806
-#define VT_VMCS_FS                     0x00000808
-#define VT_VMCS_GS                     0x0000080A
-#define VT_VMCS_LDTR                   0x0000080C
-#define VT_VMCS_TR                     0x0000080E
-#define VT_VMCS_INTR_STATUS            0x00000810
-
-/* 16-bit host state. */
-#define VT_VMCS_HOST_ES                0x00000C00
-#define VT_VMCS_HOST_CS                0x00000C02
-#define VT_VMCS_HOST_SS                0x00000C04
-#define VT_VMCS_HOST_DS                0x00000C06
-#define VT_VMCS_HOST_FS                0x00000C08
-#define VT_VMCS_HOST_GS                0x00000C0A
-#define VT_VMCS_HOST_TR                0x00000C0C
-
-/* 64-bit control fields. */
-#define VT_VMCS_IOBITMAPA              0x00002000
-#define VT_VMCS_IOBITMAPB              0x00002002
-#define VT_VMCS_MSRBITMAP              0x00002004
-#define VT_VMCS_VMEXIT_MSR_STORE_ADDR  0x00002006
-#define VT_VMCS_VMEXIT_MSR_LOAD_ADDR   0x00002008
-#define VT_VMCS_VMENTRY_MSR_LOAD_ADDR  0x0000200A
-#define VT_VMCS_EXECUTIVE_VMCS_PTR     0x0000200C
-#define VT_VMCS_TSC_OFF                0x00002010
-#define VT_VMCS_VIRT_APIC_ADDR         0x00002012
-#define VT_VMCS_APIC_ACCESS_ADDR       0x00002014
-#define VT_VMCS_PI_DESC_ADDR           0x00002016
-#define VT_VMCS_VMFUNC_CTLS            0x00002018
-#define VT_VMCS_EPTP                   0x0000201A
-#define VT_VMCS_EOI_EXIT0              0x0000201C
-#define VT_VMCS_EOI_EXIT1              0x0000201E
-#define VT_VMCS_EOI_EXIT2              0x00002020
-#define VT_VMCS_EOI_EXIT3              0x00002022
-#define VT_VMCS_EPTP_LIST_ADDR         0x00002024
-#define VT_VMCS_VMREAD_BITMAP          0x00002026
-#define VT_VMCS_VMWRITE_BITMAP         0x00002028
-#define VT_VMCS_VE_INFO_ADDR           0x0000202A
-#define VT_VMCS_XSS_EXITING_BITMAP     0x0000202C
-
-/* 64-bit read-only data field. */
-#define VT_VMCS_PHYSADDR               0x00002400
-
-/* 64-bit guest state. */
-#define VT_VMCS_LINK_PTR               0x00002800
-#define VT_VMCS_DEBUGCTL               0x00002802
-#define VT_VMCS_PAT                    0x00002804
-#define VT_VMCS_EFER                   0x00002806
-#define VT_VMCS_PGC                    0x00002808
-#define VT_VMCS_PDPTE0                 0x0000280A
-#define VT_VMCS_PDPTE1                 0x0000280C
-#define VT_VMCS_PDPTE2                 0x0000280E
-#define VT_VMCS_PDPTE3                 0x00002810
-
-/* 64-bit host state. */
-#define VT_VMCS_HOST_PAT               0x00002C00
-#define VT_VMCS_HOST_EFER              0x00002C02
-#define VT_VMCS_HOST_PGC               0x00002C04
-
-/* 32-bit control fields. */
-#define VT_VMCS_PIN_VMEXEC_CTL         0x00004000
-#define VT_VMCS_CPU_VMEXEC_CTL         0x00004002
-#define VT_VMCS_XCP_BITMAP             0x00004004
-#define VT_VMCS_PF_ERR_MASK            0x00004006
-#define VT_VMCS_PF_ERR_MATCH           0x00004008
-#define VT_VMCS_CR3_TARG_COUNT         0x0000400A
-#define VT_VMCS_VMEXIT_CTL             0x0000400C
-#define VT_VMCS_VMEXIT_MSR_STORE_COUNT 0x0000400E
-#define VT_VMCS_VMEXIT_MSR_LOAD_COUNT  0x00004010
-#define VT_VMCS_VMENTRY_CTL            0x00004012
-#define VT_VMCS_VMENTRY_MSR_LOAD_COUNT 0x00004014
-#define VT_VMCS_VMENTRY_INTR_INFO      0x00004016
-#define VT_VMCS_VMENTRY_XCP_ERR        0x00004018
-#define VT_VMCS_VMENTRY_INSTR_LEN      0x0000401A
-#define VT_VMCS_TPR_THRESHOLD          0x0000401C
-#define VT_VMCS_2ND_VMEXEC_CTL         0x0000401E
-#define VT_VMCS_PAUSE_LOOP_GAP         0x00004020
-#define VT_VMCS_PAUSE_LOOP_WINDOW      0x00004022
-
-/* 32-bit read-only data fields. */
-#define VT_VMCS_VMINSTR_ERR            0x00004400
-#define VT_VMCS_EXIT_REASON            0x00004402
-#define VT_VMCS_EXIT_INTR_INFO         0x00004404
-#define VT_VMCS_EXIT_INTR_ERR          0x00004406
-#define VT_VMCS_IDTVEC_INFO            0x00004408
-#define VT_VMCS_IDTVEC_ERR             0x0000440A
-#define VT_VMCS_INSTRLEN               0x0000440C
-#define VT_VMCS_INSTR_INFO             0x0000440E
-
-/* 32-bit guest state. */
-#define VT_VMCS_ES_LIMIT               0x00004800
-#define VT_VMCS_CS_LIMIT               0x00004802
-#define VT_VMCS_SS_LIMIT               0x00004804
-#define VT_VMCS_DS_LIMIT               0x00004806
-#define VT_VMCS_FS_LIMIT               0x00004808
-#define VT_VMCS_GS_LIMIT               0x0000480A
-#define VT_VMCS_LDTR_LIMIT             0x0000480C
-#define VT_VMCS_TR_LIMIT               0x0000480E
-#define VT_VMCS_GDTR_LIMIT             0x00004810
-#define VT_VMCS_IDTR_LIMIT             0x00004812
-#define VT_VMCS_ES_AR                  0x00004814
-#define VT_VMCS_CS_AR                  0x00004816
-#define VT_VMCS_SS_AR                  0x00004818
-#define VT_VMCS_DS_AR                  0x0000481A
-#define VT_VMCS_FS_AR                  0x0000481C
-#define VT_VMCS_GS_AR                  0x0000481E
-#define VT_VMCS_LDTR_AR                0x00004820
-#define VT_VMCS_TR_AR                  0x00004822
-#define VT_VMCS_HOLDOFF                0x00004824
-#define VT_VMCS_ACTSTATE               0x00004826
-#define VT_VMCS_SMBASE                 0x00004828
-#define VT_VMCS_SYSENTER_CS            0x0000482A
-#define VT_VMCS_TIMER                  0x0000482E
-
-/* 32-bit host state. */
-#define VT_VMCS_HOST_SYSENTER_CS       0x00004C00
-
-/* natural-width control fields. */
-#define VT_VMCS_CR0_GHMASK             0x00006000
-#define VT_VMCS_CR4_GHMASK             0x00006002
-#define VT_VMCS_CR0_SHADOW             0x00006004
-#define VT_VMCS_CR4_SHADOW             0x00006006
-#define VT_VMCS_CR3_TARGVAL0           0x00006008
-#define VT_VMCS_CR3_TARGVAL1           0x0000600A
-#define VT_VMCS_CR3_TARGVAL2           0x0000600C
-#define VT_VMCS_CR3_TARGVAL3           0x0000600E
-
-/* natural-width read-only data fields. */
-#define VT_VMCS_EXIT_QUAL              0x00006400
-#define VT_VMCS_IO_ECX                 0x00006402
-#define VT_VMCS_IO_ESI                 0x00006404
-#define VT_VMCS_IO_EDI                 0x00006406
-#define VT_VMCS_IO_EIP                 0x00006408
-#define VT_VMCS_LINEAR_ADDR            0x0000640A
-
-/* natural-width guest state. */
-#define VT_VMCS_CR0                    0x00006800
-#define VT_VMCS_CR3                    0x00006802
-#define VT_VMCS_CR4                    0x00006804
-#define VT_VMCS_ES_BASE                0x00006806
-#define VT_VMCS_CS_BASE                0x00006808
-#define VT_VMCS_SS_BASE                0x0000680A
-#define VT_VMCS_DS_BASE                0x0000680C
-#define VT_VMCS_FS_BASE                0x0000680E
-#define VT_VMCS_GS_BASE                0x00006810
-#define VT_VMCS_LDTR_BASE              0x00006812
-#define VT_VMCS_TR_BASE                0x00006814
-#define VT_VMCS_GDTR_BASE              0x00006816
-#define VT_VMCS_IDTR_BASE              0x00006818
-#define VT_VMCS_DR7                    0x0000681A
-#define VT_VMCS_ESP                    0x0000681C
-#define VT_VMCS_EIP                    0x0000681E
-#define VT_VMCS_EFLAGS                 0x00006820
-#define VT_VMCS_PENDDBG                0x00006822
-#define VT_VMCS_SYSENTER_ESP           0x00006824
-#define VT_VMCS_SYSENTER_EIP           0x00006826
-
-/* natural-width host state. */
-#define VT_VMCS_HOST_CR0               0x00006C00
-#define VT_VMCS_HOST_CR3               0x00006C02
-#define VT_VMCS_HOST_CR4               0x00006C04
-#define VT_VMCS_HOST_FSBASE            0x00006C06
-#define VT_VMCS_HOST_GSBASE            0x00006C08
-#define VT_VMCS_HOST_TRBASE            0x00006C0A
-#define VT_VMCS_HOST_GDTRBASE          0x00006C0C
-#define VT_VMCS_HOST_IDTRBASE          0x00006C0E
-#define VT_VMCS_HOST_SYSENTER_ESP      0x00006C10
-#define VT_VMCS_HOST_SYSENTER_EIP      0x00006C12
-#define VT_VMCS_HOST_ESP               0x00006C14
-#define VT_VMCS_HOST_EIP               0x00006C16
+enum {
+#define VMCS_FIELD(name, encoding, vvt) VT_VMCS_##name = encoding,
+#include "x86vt-vmcs-fields.h"
+#undef VMCS_FIELD
+};
 
 /*
  * Sizes of referenced fields
@@ -453,6 +276,7 @@
    VMX_CPU2(INVPCID,            12)                      \
    VMX_CPU2(VMFUNC,             13)                      \
    VMX_CPU2(VMCS_SHADOW,        14)                      \
+   VMX_CPU2(ENCL,               15)                      \
    VMX_CPU2(RDSEED,             16)                      \
    VMX_CPU2(EPT_VIOL_VE,        18)                      \
    VMX_CPU2(XSAVES,             20)
@@ -517,6 +341,7 @@
    VMX_MISC(CR3_TARGETS,           16,  9)               \
    VMX_MISC(MAX_MSRS,              25,  3)               \
    VMX_MISC(ALLOW_ALL_VMWRITES,    29,  1)               \
+   VMX_MISC(ZERO_VMENTRY_INSTLEN,  30,  1)               \
    VMX_MISC(MSEG_ID,               32, 32)               \
 
 #define VMX_MISC_CAP                                     \
@@ -765,6 +590,7 @@ enum {
 #define VT_EXITREASON_RDRAND               57
 #define VT_EXITREASON_INVPCID              58
 #define VT_EXITREASON_VMFUNC               59
+#define VT_EXITREASON_ENCLS                60
 #define VT_EXITREASON_RDSEED               61
 #define VT_EXITREASON_XSAVES               63
 #define VT_EXITREASON_XRSTORS              64
@@ -791,7 +617,8 @@ enum {
 #define VT_EXITREASON_SYNTH_EXC(gatenum) \
         (VT_EXITREASON_SYNTH_EXC_BASE + gatenum) /* 0-31 */
 
-#define VT_EXITREASON_VMENTRYFAIL   (1U << 31)
+#define VT_EXITREASON_INSIDE_ENCLAVE        (1U << 27)
+#define VT_EXITREASON_VMENTRYFAIL           (1U << 31)
 
 /* Instruction error codes. */
 #define VT_ERROR_VMCALL_VMX_ROOT            1
@@ -844,12 +671,13 @@ enum {
 #define VT_ACTSTATE_WFSIPI     3
 
 /* Interruptibility */
-#define VT_HOLDOFF_STI         0x1
-#define VT_HOLDOFF_MOVSS       0x2
-#define VT_HOLDOFF_SMI         0x4
-#define VT_HOLDOFF_NMI         0x8
+#define VT_HOLDOFF_STI         0x00000001
+#define VT_HOLDOFF_MOVSS       0x00000002
+#define VT_HOLDOFF_SMI         0x00000004
+#define VT_HOLDOFF_NMI         0x00000008
+#define VT_HOLDOFF_ENCLAVE     0x00000010
 #define VT_HOLDOFF_INST        (VT_HOLDOFF_STI | VT_HOLDOFF_MOVSS)
-#define VT_HOLDOFF_RSV         0xFFFFFFF0
+#define VT_HOLDOFF_RSV         0xFFFFFFE0
 
 /* VM Functions */
 #define VT_VMFUNC_MASK(_vmfunc)        (1ULL << (VT_VMFUNC_ ## _vmfunc))
@@ -952,6 +780,8 @@ enum {
     MSR_VMX_EPT_VPID_INVEPT_EPT_CTX)
 
 typedef uint64 VTConfig[NUM_VMX_MSRS];
+
+typedef uint32 VTVMCSFieldBitmap[VT_ENCODING_NUM_SIZES][VT_ENCODING_NUM_TYPES];
 
 /*
  *----------------------------------------------------------------------

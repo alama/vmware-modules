@@ -1,5 +1,5 @@
 /*********************************************************
- * Copyright (C) 1998 VMware, Inc. All rights reserved.
+ * Copyright (C) 1998-2014 VMware, Inc. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License as published by the
@@ -39,6 +39,7 @@
 #include "x86desc.h"
 #include "x86sel.h"
 #include "x86_basic_defs.h"
+#include "x86msr.h"
 
 #ifdef VM_X86_64
 #define _GETSET_DTR_TYPE DTR64
@@ -408,6 +409,11 @@ _Get_flags(void)
    var = _Get_flags();       \
 } while (0)
 
+static INLINE Bool
+HwInterruptsEnabled(uint32 eflags)
+{
+   return (eflags & EFLAGS_IF) != 0;
+}
 
 /* Checked against the Intel manual and GCC --hpreg */
 static INLINE void
@@ -429,7 +435,7 @@ CLTS(void)
      __asm__ __volatile__("fs; invlpg %0": :"m" (*(char *) (_addr)):"memory"); \
 } while (0)
 
-#if ! defined(VMKERNEL) && ! defined(VMKBOOT)
+#if ! defined(VMKBOOT)
 #define RESTORE_FLAGS _Set_flags
 #define ENABLE_INTERRUPTS() __asm__ __volatile__ ("sti": : :"memory")
 #define CLEAR_INTERRUPTS()  __asm__ __volatile__ ("cli": : :"memory")
@@ -982,4 +988,11 @@ INTERRUPTS_ENABLED(void)
    SAVE_FLAGS(flags);
    return ((flags & EFLAGS_IF) != 0);
 }
+
+static INLINE void
+SET_KERNEL_PER_CORE(uint64 val)
+{
+   __SET_MSR(MSR_GSBASE, val);
+}
+
 #endif

@@ -1,5 +1,5 @@
 /*********************************************************
- * Copyright (C) 1998 VMware, Inc. All rights reserved.
+ * Copyright (C) 1998-2015 VMware, Inc. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License as published by the
@@ -76,7 +76,7 @@ typedef struct DblLnkLst_Links {
  */
 
 static INLINE void
-DblLnkLst_Init(DblLnkLst_Links *l) // IN
+DblLnkLst_Init(DblLnkLst_Links *l) // OUT
 {
    l->prev = l->next = l;
 }
@@ -102,8 +102,8 @@ DblLnkLst_Init(DblLnkLst_Links *l) // IN
  */
 
 static INLINE void
-DblLnkLst_Link(DblLnkLst_Links *l1, // IN
-               DblLnkLst_Links *l2) // IN
+DblLnkLst_Link(DblLnkLst_Links *l1, // IN/OUT
+               DblLnkLst_Links *l2) // IN/OUT
 {
    DblLnkLst_Links *tmp;
 
@@ -136,8 +136,8 @@ DblLnkLst_Link(DblLnkLst_Links *l1, // IN
  */
 
 static INLINE void
-DblLnkLst_Unlink(DblLnkLst_Links *l1, // IN
-                 DblLnkLst_Links *l2) // IN
+DblLnkLst_Unlink(DblLnkLst_Links *l1, // IN/OUT
+                 DblLnkLst_Links *l2) // IN/OUT
 {
    DblLnkLst_Links *tmp;
 
@@ -164,7 +164,7 @@ DblLnkLst_Unlink(DblLnkLst_Links *l1, // IN
  */
 
 static INLINE void
-DblLnkLst_Unlink1(DblLnkLst_Links *l) // IN
+DblLnkLst_Unlink1(DblLnkLst_Links *l) // IN/OUT
 {
    DblLnkLst_Unlink(l, l->next);
 }
@@ -214,8 +214,8 @@ DblLnkLst_IsLinked(DblLnkLst_Links const *l) // IN
  */
 
 static INLINE void
-DblLnkLst_LinkFirst(DblLnkLst_Links *head, // IN
-                    DblLnkLst_Links *l)    // IN
+DblLnkLst_LinkFirst(DblLnkLst_Links *head, // IN/OUT
+                    DblLnkLst_Links *l)    // IN/OUT
 {
    DblLnkLst_Link(head->next, l);
 }
@@ -238,8 +238,8 @@ DblLnkLst_LinkFirst(DblLnkLst_Links *head, // IN
  */
 
 static INLINE void
-DblLnkLst_LinkLast(DblLnkLst_Links *head, // IN
-                   DblLnkLst_Links *l)    // IN
+DblLnkLst_LinkLast(DblLnkLst_Links *head, // IN/OUT
+                   DblLnkLst_Links *l)    // IN/OUT
 {
    DblLnkLst_Link(head, l);
 }

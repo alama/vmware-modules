@@ -31,6 +31,10 @@
 #include "includeCheck.h"
 
 
+#ifdef __APPLE__
+Bool HostIFGlobalLock_Start(void);
+void HostIFGlobalLock_Stop(void);
+#endif
 void HostIF_GlobalLock(int callerID);
 void HostIF_GlobalUnlock(int callerID);
 #ifdef VMX86_DEBUG

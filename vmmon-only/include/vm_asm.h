@@ -1,5 +1,5 @@
 /*********************************************************
- * Copyright (C) 1998-2003 VMware, Inc. All rights reserved.
+ * Copyright (C) 1998-2014 VMware, Inc. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License as published by the
@@ -35,6 +35,10 @@
 #define INCLUDE_ALLOW_USERLEVEL
 #include "includeCheck.h"
 
+#ifdef VM_ARM_64
+#include "vm_asm_arm64.h"
+#else
+
 #include "vm_basic_asm.h"
 #include "x86msr.h"
 
@@ -57,7 +61,6 @@ SET_GS64(uint64 gs64)
 {
    __SET_MSR(MSR_GSBASE, gs64);
 }
-
 
 static INLINE void
 SET_KernelGS64(uint64 kgs64)
@@ -86,4 +89,5 @@ GET_KernelGS64(void)
    return __GET_MSR(MSR_KERNELGSBASE);
 }
 
+#endif // VM_ARM_64
 #endif

@@ -1,5 +1,5 @@
 /*********************************************************
- * Copyright (C) 1998-2014 VMware, Inc. All rights reserved.
+ * Copyright (C) 1998-2015 VMware, Inc. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License as published by the
@@ -99,12 +99,8 @@ static int LinuxDriver_Open(struct inode *inode, struct file *filp);
  * script needs to find it.  So it shouldn't be static.  ("hidden"
  * visibility would be OK.)
  */
-int LinuxDriver_Ioctl(struct inode *inode, struct file *filp,
-                      u_int iocmd, unsigned long ioarg);
-#if defined(HAVE_UNLOCKED_IOCTL) || defined(HAVE_COMPAT_IOCTL)
-static long LinuxDriver_UnlockedIoctl(struct file *filp,
-                           u_int iocmd, unsigned long ioarg);
-#endif
+long LinuxDriver_Ioctl(struct file *filp, u_int iocmd,
+                       unsigned long ioarg);
 
 static int LinuxDriver_Close(struct inode *inode, struct file *filp);
 static unsigned int LinuxDriverPoll(struct file *file, poll_table *wait);
@@ -118,6 +114,7 @@ static struct page *LinuxDriverNoPage(struct vm_area_struct *vma,
 static int LinuxDriverMmap(struct file *filp, struct vm_area_struct *vma);
 
 static void LinuxDriverPollTimeout(unsigned long clientData);
+static unsigned int LinuxDriverEstimateTSCkHz(void);
 
 static struct vm_operations_struct vmuser_mops = {
 #ifdef VMW_NOPAGE_2624
@@ -129,127 +126,150 @@ static struct vm_operations_struct vmuser_mops = {
 
 static struct file_operations vmuser_fops;
 static struct timer_list tscTimer;
+static Atomic_uint32 tsckHz;
+static VmTimeStart tsckHzStartTime;
+
 
 /*
  *----------------------------------------------------------------------
  *
- * VMX86_RegisterMonitor --
+ * LinuxDriverEstimateTSCkHzWork --
  *
- *      (debugging support) Should be the first function of this file
+ *      Estimates TSC frequency in terms of cycles and system uptime
+ *      elapsed since module init. At module init, the starting cycle
+ *      count and uptime are recorded (in tsckHzStartTime) and a timer
+ *      is scheduled to call this function after 4 seconds.
  *
- * Results:
- *
- *      Registers the module.
- *      /sbin/ksyms -a | grep VMX86_RegisterMonitor will return the base
- *      address of that function as loaded in the kernel.
- *
- *      Since this is the first function of the kernel module,
- *      every other symbol can be computing by adding the base
- *      to the output of nm.
- *
- * Side effects:
- *      None.
+ *      It is possible that vmx queries the TSC rate after module init
+ *      but before the 4s timer expires. In that case, we just go ahead
+ *      and compute the rate for the duration since the driver loaded.
+ *      When the timer expires, the new computed value is dropped. If the
+ *      query races with the timer, the first thread to write to 'tsckHz'
+ *      wins.
  *
  *----------------------------------------------------------------------
  */
 
-int
-VMX86_RegisterMonitor(int);
-
-EXPORT_SYMBOL(VMX86_RegisterMonitor);
-
-int
-VMX86_RegisterMonitor(int value)  // IN:
-{
-   printk("/dev/vmmon: RegisterMonitor(%d) \n",value);
-
-   return 1291;
-}
-
-#ifndef HAVE_COMPAT_IOCTL
-static int
-LinuxDriver_Ioctl32_Handler(unsigned int fd,
-                            unsigned int iocmd,
-                            unsigned long ioarg,
-                            struct file *filp)
-{
-   int ret = -ENOTTY;
-
-   if (filp && filp->f_op && filp->f_op->ioctl == LinuxDriver_Ioctl) {
-      ret = LinuxDriver_Ioctl(filp->f_dentry->d_inode, filp, iocmd, ioarg);
-   }
-
-   return ret;
-}
-#endif /* !HAVE_COMPAT_IOCTL */
-
-static int
-register_ioctl32_handlers(void)
-{
-#ifndef HAVE_COMPAT_IOCTL
-   {
-      int i;
-
-      for (i = IOCTL_VMX86_FIRST; i < IOCTL_VMX86_LAST; i++) {
-         int retval = register_ioctl32_conversion(i,
-                                                  LinuxDriver_Ioctl32_Handler);
-
-         if (retval) {
-            Warning("Fail to register ioctl32 conversion for cmd %d\n", i);
-
-            return retval;
-         }
-      }
-   }
-#endif /* !HAVE_COMPAT_IOCTL */
-   return 0;
-}
-
 static void
-unregister_ioctl32_handlers(void)
+LinuxDriverEstimateTSCkHzWork(void *data)
 {
-#ifndef HAVE_COMPAT_IOCTL
-   {
-      int i;
+   VmTimeStart curTime;
+   uint64 cycles;
+   uint64 uptime;
+   unsigned int khz;
 
-      for (i = IOCTL_VMX86_FIRST; i < IOCTL_VMX86_LAST; i++) {
-         int retval = unregister_ioctl32_conversion(i);
+   ASSERT(tsckHzStartTime.count != 0 && tsckHzStartTime.time != 0);
+   Vmx86_ReadTSCAndUptime(&curTime);
+   cycles = curTime.count - tsckHzStartTime.count;
+   uptime = curTime.time  - tsckHzStartTime.time;
+   khz    = Vmx86_ComputekHz(cycles, uptime);
 
-         if (retval) {
-            Warning("Fail to unregister ioctl32 conversion for cmd %d\n", i);
-         }
-      }
+   if (khz != 0) {
+       if (Atomic_ReadIfEqualWrite(&tsckHz, 0, khz) == 0) {
+          Log("TSC frequency estimated using system uptime: %u\n", khz);
+       }
+   } else if (Atomic_ReadIfEqualWrite(&tsckHz, 0, cpu_khz) == 0) {
+       Log("Failed to compute TSC frequency, using cpu_khz: %u\n", cpu_khz);
    }
-#endif /* !HAVE_COMPAT_IOCTL */
 }
 
 
 /*
  *----------------------------------------------------------------------
  *
- * LinuxDriverComputeTSCFreq --
+ * LinuxDriverEstimateTSCkHz --
  *
- *      Compute TSC frequency based on time and TSC cycles which passed
- *      since Vmx86_SetStartTime() was invoked.  Should be issued only
- *      once by callback 4 seconds after vmmon loads.
+ *      Returns the estimated TSC khz, cached in tscKhz. If tsckHz is
+ *      0, the routine kicks off estimation work on CPU 0.
  *
  * Results:
  *
- *      vmmon learns tsc frequency if some reasonable result is computed.
+ *      Returns the estimated TSC khz value.
+ *
+ *----------------------------------------------------------------------
+ */
+
+static unsigned int
+LinuxDriverEstimateTSCkHz(void)
+{
+   int err;
+   uint32 khz;
+
+   khz = Atomic_Read(&tsckHz);
+   if (khz != 0) {
+      return khz;
+   }
+   err = compat_smp_call_function_single(0, LinuxDriverEstimateTSCkHzWork,
+                                         NULL, 1);
+   /*
+    * The smp function call may fail for two reasons, either
+    * the function is not supportd by the kernel, or the cpu
+    * went offline. In this unlikely event, we just perform
+    * the work wherever we can.
+    */
+   if (err != 0) {
+      LinuxDriverEstimateTSCkHzWork(NULL);
+   }
+
+   return Atomic_Read(&tsckHz);
+}
+
+
+/*
+ *----------------------------------------------------------------------
+ *
+ * LinuxDriverEstimateTSCkHzDeferred --
+ *
+ *      Timer callback for deferred TSC rate estimation.
+ *
+ *----------------------------------------------------------------------
+ */
+static void
+LinuxDriverEstimateTSCkHzDeferred(unsigned long data)
+{
+   LinuxDriverEstimateTSCkHz();
+}
+
+
+/*
+ *----------------------------------------------------------------------
+ *
+ * LinuxDriverInitTSCkHz --
+ *
+ *      Initialize TSC khz rate.
+ *
+ *      We rely on the kernel estimated cycle rate in the exported
+ *      variable tsc_khz. If the kernel has disabled tsc, tsc_khz
+ *      will be 0, and we fall back on our own estimation routines.
  *
  * Side effects:
- *      None.
+ *
+ *      If tsc_khz is unusable, schedules a 4s timer for deferred
+ *      khz estimation (see LinuxDriverEstimateTSCkHz).
  *
  *----------------------------------------------------------------------
  */
 
 static void
-LinuxDriverComputeTSCFreq(unsigned long data)  // IN:
+LinuxDriverInitTSCkHz(void)
 {
-   Vmx86_GetkHzEstimate(&linuxState.startTime);
+   unsigned int khz;
+ 
+   khz = compat_tsc_khz();
+   if (khz != 0) {
+      Atomic_Write(&tsckHz, khz);
+      Log("Using tsc_khz as TSC frequency: %u\n", khz);
+      return;
+   }
+
+   Vmx86_ReadTSCAndUptime(&tsckHzStartTime);
+   tscTimer.function = LinuxDriverEstimateTSCkHzDeferred;
+   tscTimer.expires  = jiffies + 4 * HZ;
+   tscTimer.data     = 0;
+   add_timer(&tscTimer);
 }
 
-
+ 
 /*
  *----------------------------------------------------------------------
  *
@@ -297,10 +317,6 @@ init_module(void)
    linuxState.fastClockPriority = -20;
    linuxState.swapSize = VMMON_UNKNOWN_SWAP_SIZE;
 
-#ifdef POLLSPINLOCK
-   spin_lock_init(&linuxState.pollListLock);
-#endif
-
    /*
     * Initialize the file_operations structure. Because this code is always
     * compiled as a module, this is fine to do it here and not in a static
@@ -310,14 +326,8 @@ init_module(void)
    memset(&vmuser_fops, 0, sizeof vmuser_fops);
    vmuser_fops.owner = THIS_MODULE;
    vmuser_fops.poll = LinuxDriverPoll;
-#ifdef HAVE_UNLOCKED_IOCTL
-   vmuser_fops.unlocked_ioctl = LinuxDriver_UnlockedIoctl;
-#else
-   vmuser_fops.ioctl = LinuxDriver_Ioctl;
-#endif
-#ifdef HAVE_COMPAT_IOCTL
-   vmuser_fops.compat_ioctl = LinuxDriver_UnlockedIoctl;
-#endif
+   vmuser_fops.unlocked_ioctl = LinuxDriver_Ioctl;
+   vmuser_fops.compat_ioctl = LinuxDriver_Ioctl;
    vmuser_fops.open = LinuxDriver_Open;
    vmuser_fops.release = LinuxDriver_Close;
    vmuser_fops.mmap = LinuxDriverMmap;
@@ -347,30 +357,9 @@ init_module(void)
    Log("Module %s: registered with major=%d minor=%d\n",
        linuxState.deviceName, linuxState.major, linuxState.minor);
 
-   retval = register_ioctl32_handlers();
-   if (retval) {
-#ifdef VMX86_DEVEL
-      unregister_chrdev(linuxState.major, linuxState.deviceName);
-#else
-      misc_deregister(&linuxState.misc);
-#endif
-      return retval;
-   }
-
    HostIF_InitUptime();
-
-   /*
-    * Snap shot the time stamp counter and the real time so we
-    * can later compute an estimate of the cycle time.
-    */
-
-   Vmx86_ReadTSCAndUptime(&linuxState.startTime);
    init_timer(&tscTimer);
-   tscTimer.data = 0;
-   tscTimer.function = LinuxDriverComputeTSCFreq;
-   tscTimer.expires = jiffies + 4 * HZ;
-   add_timer(&tscTimer);
-
+   LinuxDriverInitTSCkHz();
    Vmx86_InitIDList();
 
    Log("Module %s: initialized\n", linuxState.deviceName);
@@ -392,8 +381,6 @@ init_module(void)
 void
 cleanup_module(void)
 {
-   unregister_ioctl32_handlers();
-
    /*
     * XXX smp race?
     */
@@ -608,25 +595,13 @@ LinuxDriver_Close(struct inode *inode, // IN
     * Clean up poll state.
     */
 
-#ifdef POLLSPINLOCK
-   {
-   unsigned long flags;
-
-   spin_lock_irqsave(&linuxState.pollListLock, flags);
-#else
    HostIF_PollListLock(0);
-#endif
    if (vmLinux->pollBack != NULL) {
       if ((*vmLinux->pollBack = vmLinux->pollForw) != NULL) {
          vmLinux->pollForw->pollBack = vmLinux->pollBack;
       }
    }
-#ifdef POLLSPINLOCK
-   spin_unlock_irqrestore(&linuxState.pollListLock, flags);
-   }
-#else
    HostIF_PollListUnlock(0);
-#endif
    // XXX call wake_up()?
    HostIF_UnmapUserMem(vmLinux->pollTimeoutHandle);
 
@@ -771,14 +746,7 @@ LinuxDriverWakeUp(Bool selective)  // IN:
       VMLinux *p;
       VMLinux *next;
 
-      //compat_preempt_disable();
-#ifdef POLLSPINLOCK
-      unsigned long flags;
-
-      spin_lock_irqsave(&linuxState.pollListLock, flags);
-#else
       HostIF_PollListLock(1);
-#endif
       do_gettimeofday(&tv);
       now = tv.tv_sec * 1000000ULL + tv.tv_usec;
 
@@ -794,12 +762,7 @@ LinuxDriverWakeUp(Bool selective)  // IN:
             wake_up(&p->pollQueue);
          }
       }
-#ifdef POLLSPINLOCK
-      spin_unlock_irqrestore(&linuxState.pollListLock, flags);
-#else
       HostIF_PollListUnlock(1);
-#endif
-      //compat_preempt_enable();
    }
 
    LinuxDriverFlushPollQueue();
@@ -859,13 +822,7 @@ LinuxDriverPoll(struct file *filp,  // IN:
          vmLinux->pollTime = *vmLinux->pollTimeoutPtr +
                                        tv.tv_sec * 1000000ULL + tv.tv_usec;
          if (vmLinux->pollBack == NULL) {
-#ifdef POLLSPINLOCK
-            unsigned long flags;
-
-            spin_lock_irqsave(&linuxState.pollListLock, flags);
-#else
             HostIF_PollListLock(2);
-#endif
             if (vmLinux->pollBack == NULL) {
                if ((vmLinux->pollForw = linuxState.pollList) != NULL) {
                   vmLinux->pollForw->pollBack = &vmLinux->pollForw;
@@ -873,11 +830,7 @@ LinuxDriverPoll(struct file *filp,  // IN:
                linuxState.pollList = vmLinux;
                vmLinux->pollBack = &linuxState.pollList;
             }
-#ifdef POLLSPINLOCK
-            spin_unlock_irqrestore(&linuxState.pollListLock, flags);
-#else
             HostIF_PollListUnlock(2);
-#endif
          }
       } else {
          LinuxDriverQueuePoll();
@@ -1374,9 +1327,8 @@ LinuxDriverSyncReadTSCs(uint64 *delta) // OUT: TSC max - TSC min
  *-----------------------------------------------------------------------------
  */
 
-int
-LinuxDriver_Ioctl(struct inode *inode,  // IN:
-                  struct file *filp,    // IN:
+long
+LinuxDriver_Ioctl(struct file *filp,    // IN:
                   u_int iocmd,          // IN:
                   unsigned long ioarg)  // IN:
 {
@@ -1401,9 +1353,6 @@ LinuxDriver_Ioctl(struct inode *inode,  // IN:
    case IOCTL_VMX86_INIT_CROSSGDT:
    case IOCTL_VMX86_SET_UID:
    case IOCTL_VMX86_LOOK_UP_MPN:
-#if defined(__linux__) && defined(VMX86_DEVEL)
-   case IOCTL_VMX86_LOOK_UP_LARGE_MPN:
-#endif
    case IOCTL_VMX86_GET_NUM_VMS:
    case IOCTL_VMX86_GET_TOTAL_MEM_USAGE:
    case IOCTL_VMX86_SET_HARD_LIMIT:
@@ -1504,12 +1453,6 @@ LinuxDriver_Ioctl(struct inode *inode,  // IN:
       break;
    }
 
-   case IOCTL_VMX86_LATE_INIT_VM:
-      if (Vmx86_LateInitVM(vm)) {
-         retval = -EINVAL;
-      }
-      break;
-
    case IOCTL_VMX86_RUN_VM:
       vcpuid = ioarg;
 
@@ -1585,20 +1528,6 @@ LinuxDriver_Ioctl(struct inode *inode,  // IN:
       retval = HostIF_CopyToUser((void *)ioarg, &args, sizeof args);
       break;
    }
-
-#if defined(__linux__) && defined(VMX86_DEVEL)
-  case IOCTL_VMX86_LOOK_UP_LARGE_MPN: {
-      VMLockPage args;
-
-      retval = HostIF_CopyFromUser(&args, (void *)ioarg, sizeof args);
-      if (retval) {
-         break;
-      }
-      args.ret.status = HostIF_LookupLargeMPN(args.uAddr, &args.ret.mpn);
-      retval = HostIF_CopyToUser((void *)ioarg, &args, sizeof args);
-      break;
-   }
-#endif
 
    case IOCTL_VMX86_GET_NUM_VMS:
       retval = Vmx86_GetNumVMs();
@@ -1739,7 +1668,7 @@ LinuxDriver_Ioctl(struct inode *inode,  // IN:
                                    sizeof ipiTargets);
 
       if (retval == 0) {
-         HostIF_IPI(vm, &ipiTargets, TRUE);
+         HostIF_IPI(vm, &ipiTargets);
       }
 
       break;
@@ -1763,7 +1692,7 @@ LinuxDriver_Ioctl(struct inode *inode,  // IN:
    }
 
    case IOCTL_VMX86_GET_KHZ_ESTIMATE:
-      retval = Vmx86_GetkHzEstimate(&linuxState.startTime);
+      retval = LinuxDriverEstimateTSCkHz();
       break;
 
    case IOCTL_VMX86_GET_ALL_CPUID: {
@@ -1873,11 +1802,11 @@ LinuxDriver_Ioctl(struct inode *inode,  // IN:
            break;
          }
          if (iocmd == IOCTL_VMX86_ALLOC_LOCKED_PAGES) {
-            retval = Vmx86_AllocLockedPages(vm, req.mpn64List,
+            retval = Vmx86_AllocLockedPages(vm, req.mpnList,
                                             req.mpnCount, FALSE,
                                             req.ignoreLimits);
          } else {
-            retval = Vmx86_FreeLockedPages(vm, req.mpn64List,
+            retval = Vmx86_FreeLockedPages(vm, req.mpnList,
                                            req.mpnCount, FALSE);
          }
          break;
@@ -1903,7 +1832,7 @@ LinuxDriver_Ioctl(struct inode *inode,  // IN:
          if (retval) {
             break;
          }
-         retval = Vmx86_GetLockedPageList(vm, req.mpn64List, req.mpnCount);
+         retval = Vmx86_GetLockedPageList(vm, req.mpnList, req.mpnCount);
          break;
       }
 
@@ -2052,32 +1981,6 @@ LinuxDriver_Ioctl(struct inode *inode,  // IN:
 exit:
    return retval;
 }
-
-
-#if defined(HAVE_UNLOCKED_IOCTL) || defined(HAVE_COMPAT_IOCTL)
-/*
- *-----------------------------------------------------------------------------
- *
- * LinuxDriver_UnlockedIoctl --
- *
- *      Main path for UserRPC.  See LinuxDriver_Ioctl.
- *
- * Results:
- *
- * Side effects:
- *      None.
- *
- *-----------------------------------------------------------------------------
- */
-
-static long
-LinuxDriver_UnlockedIoctl(struct file *filp,    // IN:
-                          u_int iocmd,          // IN:
-                          unsigned long ioarg)  // IN:
-{
-   return LinuxDriver_Ioctl(NULL, filp, iocmd, ioarg);
-}
-#endif
 
 
 /*

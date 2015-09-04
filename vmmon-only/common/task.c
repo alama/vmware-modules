@@ -1,5 +1,5 @@
 /*********************************************************
- * Copyright (C) 1998-2014 VMware, Inc. All rights reserved.
+ * Copyright (C) 1998-2015 VMware, Inc. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License as published by the
@@ -58,6 +58,7 @@
 #include "x86vt.h"
 #include "x86vtinstr.h"
 #include "apic.h"
+#include "x86perfctr.h"
 
 #if defined(_WIN64)
 #   include "x86.h"
@@ -73,7 +74,7 @@
 } while (0)
 
 static CrossGDT *crossGDT = NULL;
-static MPN64 crossGDTMPNs[CROSSGDT_NUMPAGES];
+static MPN crossGDTMPNs[CROSSGDT_NUMPAGES];
 static DTR crossGDTDescHKLA;
 static Selector kernelStackSegment = 0;
 static uint32 dummyLVT;
@@ -105,8 +106,8 @@ TaskAllocHVRootPage(Atomic_uint64 *slot) // IN/OUT
 {
    uint32 *content;
    uint64 vmxBasicMSR;
-   MPN64 mpn;
-   static const MPN64 invalidMPN = INVALID_MPN;
+   MPN mpn;
+   static const MPN invalidMPN = INVALID_MPN;
 
    ASSERT(slot != NULL);
 
@@ -172,10 +173,10 @@ TaskAllocHVRootPage(Atomic_uint64 *slot) // IN/OUT
  *-----------------------------------------------------------------------------
  */
 
-static MPN64
+static MPN
 TaskGetHVRootPage(Atomic_uint64 *slot) // IN/OUT
 {
-   MPN64 mpn = Atomic_Read64(slot);
+   MPN mpn = Atomic_Read64(slot);
 
    if (mpn != INVALID_MPN) {
       return mpn;
@@ -207,7 +208,7 @@ TaskGetHVRootPage(Atomic_uint64 *slot) // IN/OUT
  *-----------------------------------------------------------------------------
  */
 
-MPN64
+MPN
 Task_GetHVRootPageForPCPU(uint32 pCPU) // IN
 {
    ASSERT(pCPU < ARRAYSIZE(hvRootPage));
@@ -340,7 +341,7 @@ Task_GetTmpGDT(uint32 pCPU) // IN
 static void
 TaskFreeHVRootPages(void)
 {
-   MPN64 mpn;
+   MPN mpn;
    unsigned i;
 
    for (i = 0; i < ARRAYSIZE(hvRootPage); i++) {
@@ -537,7 +538,7 @@ Task_Initialize(void)
 {
    unsigned i;
 
-   ASSERT_ON_COMPILE(sizeof (Atomic_uint64) == sizeof (MPN64));
+   ASSERT_ON_COMPILE(sizeof (Atomic_uint64) == sizeof (MPN));
    for (i = 0; i < ARRAYSIZE(hvRootPage); i++) {
       Atomic_Write64(&hvRootPage[i], INVALID_MPN);
    }
@@ -581,31 +582,14 @@ gotnzss:;
    }
 
    /*
-    * Check if PEBS is supported.  For simplicity we assume there will not 
+    * Check if PEBS is supported.  For simplicity we assume there will not
     * be mixed CPU models.  According to the Intel SDM, PEBS is supported if:
     *
-    * IA32_MISC_ENABLE.EMON_AVAILABE (bit 7) is set and 
+    * IA32_MISC_ENABLE.EMON_AVAILABE (bit 7) is set and
     * IA32_MISC_ENABLE.PEBS_UNAVAILABE (bit 12) is clear.
-:if expand("%") == ""|browse confirm w|else|confirm w|endif
     */
-  
-   if ((CPUID_GetVendor() == CPUID_VENDOR_INTEL) &&
-       ((__GET_MSR(MSR_MISC_ENABLE) & MSR_MISC_ENABLE_EMON_AVAILABLE) != 0) && 
-       ((__GET_MSR(MSR_MISC_ENABLE) & MSR_MISC_ENABLE_PEBS_UNAVAILABLE) == 0)) {
-      uint32 hypervisor[4];
 
-      /*
-       * Hyper-V doesn't support PEBS and may #GP if we try to write the 
-       * PEBS enable MSR so always consider PEBS un-available on Hyper-V - 
-       * PR 1039970. 
-       */
-      if (CPUID_HypervisorCPUIDSig(hypervisor) && 
-          !memcmp(hypervisor, CPUID_HYPERV_HYPERVISOR_VENDOR_STRING, 12)) {
-         pebsAvailable = FALSE;
-      } else {
-         pebsAvailable = TRUE;
-      }  
-   }
+   pebsAvailable = PerfCtr_PEBSAvailable();
    return TRUE;
 }
 
@@ -751,7 +735,7 @@ Task_AllocCrossGDT(InitBlock *initBlock)  // OUT: crossGDT values filled in
     */
 
    if (crossGDT == NULL) {
-      MPN64 maxValidFirst =
+      MPN maxValidFirst =
          0xFFC00 /* 32-bit MONITOR_LINEAR_START */ - CROSSGDT_NUMPAGES;
 
       /*
@@ -865,11 +849,10 @@ Task_InitCrosspage(VMDriver *vm,          // IN
    ASSERT_ON_COMPILE(sizeof initParams->crossGDTMPNs == sizeof crossGDTMPNs);
    memcpy(initParams->crossGDTMPNs, crossGDTMPNs, sizeof crossGDTMPNs);
 
-   ASSERT(MODULECALL_CROSS_PAGE_LEN == 1);
    for (vcpuid = 0; vcpuid < initParams->numVCPUs;  vcpuid++) {
       VA64         crossPageUserAddr = initParams->crosspage[vcpuid];
       VMCrossPage *p                 = HostIF_MapCrossPage(vm, crossPageUserAddr);
-      MPN64        crossPageMPN;
+      MPN          crossPageMPN;
 
       if (p == NULL) {
          return 1;
@@ -1232,10 +1215,11 @@ TaskSaveDebugRegisters(VMCrossPage *crosspage)
 
    saveGotDB = TaskGotException(crosspage, EXC_DB);
    TaskSetException(crosspage, EXC_DB, FALSE);
+   COMPILER_MEM_BARRIER();      /* Prevent hoisting #UD-raising instructions. */
    SAVE_DR(7);
 
    /*
-    * In any case, the DR7 at this point shouldn't have the GD bit set.
+    * In all cases, DR7 shouldn't have the GD bit set.
     */
 
    TS_ASSERT(!(crosspage->crosspageData.hostDR[7] & DR7_GD));
@@ -1255,10 +1239,12 @@ TaskSaveDebugRegisters(VMCrossPage *crosspage)
     * they'll get restored to what they were.  Then make sure
     * breakpoints are disabled during switch.
     *
-    * Note that I am assuming DR6_BD was clear before the #DB and so I'm
-    * clearing it here.  If it was set, we will end up restoring it cleared,
-    * but there's no way to tell.  Someone suggested that ICEBP would tell us
-    * but it may also clear DR6<3:0>.
+    * Note that I am assuming DR6_BD was clear before the #DB and so
+    * I'm clearing it here.  If it was set, we will end up restoring
+    * it cleared, but there's no way to tell.  Someone suggested that
+    * ICEBP would tell us but it may also clear DR6<3:0>.
+    *
+    * SAVE_DR(6) can raise #DB.
     */
 
    if (TaskGotException(crosspage, EXC_DB) &&
@@ -1287,7 +1273,7 @@ TaskSaveDebugRegisters(VMCrossPage *crosspage)
    TaskSetException(crosspage, EXC_DB, saveGotDB);
 
    /*
-    * At any rate, hostDR[6,7] have host contents in them now.
+    * hostDR[6,7] have host contents in them now.
     */
 
    crosspage->crosspageData.hostDRSaved = 0xC0;
@@ -1714,11 +1700,9 @@ TaskTestCrossPageExceptionHandlers(VMCrossPage *crosspage)
 static INLINE Bool
 TaskShouldRetryWorldSwitch(VMCrossPage *crosspage)
 {
-   if (crosspage->crosspageData.retryWorldSwitch) {
-      crosspage->crosspageData.retryWorldSwitch = FALSE;
-      return TRUE;
-   }
-   return FALSE;
+   Bool result = crosspage->crosspageData.retryWorldSwitch;
+   crosspage->crosspageData.retryWorldSwitch = FALSE;
+   return result;
 }
 
 
@@ -1727,17 +1711,20 @@ TaskShouldRetryWorldSwitch(VMCrossPage *crosspage)
  *
  * Task_Switch --
  *
- *      Switches from the host context into the monitor
- *      context. Think of it as a coroutine switch that changes
- *      not only the registers, but also the address space
- *      and all the hardware state.
+ *      Switches from the host context into the monitor context and
+ *      then receives control when the monitor returns to the
+ *      host.
+ *
+ *      Think of it as a coroutine switch that changes not only the
+ *      registers, but also the address space and all the hardware
+ *      state.
  *
  * Results:
  *      None.
  *
  * Side effects:
- *      Jump to the other side. Has no direct effect on the
- *      host-visible state except that it might generate an interrupt.
+ *      Jump to the monitor. Has no direct effect on the host-visible
+ *      state except that it might generate an interrupt.
  *
  *-----------------------------------------------------------------------------
  */
@@ -1746,7 +1733,6 @@ void
 Task_Switch(VMDriver *vm,  // IN
             Vcpuid vcpuid) // IN
 {
-   Bool        loopForced;
    uintptr_t   flags;
    uint64      fs64  = 0;
    uint64      gs64  = 0;
@@ -1762,7 +1748,7 @@ Task_Switch(VMDriver *vm,  // IN
    Bool thermalNMI;
    VMCrossPage *crosspage = vm->crosspage[vcpuid];
    uint32 pCPU;
-   MPN64 hvRootMPN;
+   MPN hvRootMPN;
    Descriptor *tempGDTBase;
 
    ASSERT_ON_COMPILE(sizeof(VMCrossPage) == PAGE_SIZE);
@@ -1770,7 +1756,6 @@ Task_Switch(VMDriver *vm,  // IN
    SAVE_FLAGS(flags);
    CLEAR_INTERRUPTS();
 
-   loopForced = FALSE;
    pCPU = HostIF_GetCurrentPCPU();
    ASSERT(pCPU < ARRAYSIZE(hvRootPage) && pCPU < ARRAYSIZE(tmpGDT));
 
@@ -1818,8 +1803,8 @@ Task_Switch(VMDriver *vm,  // IN
 
          /*
           * Save the host's standard IDT and set up an IDT that only
-          * space for all the hardware exceptions (though only a few are
-          * handled).
+          * has space for all the hardware exceptions (though only a
+          * few are handled).
           */
 
          TaskSaveIDT64(&hostIDT64);
@@ -1919,57 +1904,8 @@ Task_Switch(VMDriver *vm,  // IN
           * make sure there is a valid IDT, GDT, stack, etc. at every
           * instruction boundary during the switch.
           */
-         if (WS_NMI_STRESS) {
+         if (WS_INTR_STRESS) {
             TaskEnableTF();
-         }
-
-         /*
-          * If this section is enabled, it will send the host an NMI via
-          * the local APIC to make sure it really can handle NMIs.
-          */
-         if (FALSE && vmx86_debug) {
-            uint32 timeout;
-            static uint32 counter = 0;
-
-            if (++counter >= 100000) {
-               counter = 0;
-               TaskSetException(crosspage, EXC_NMI, FALSE); // no NMI seen
-               if (!vm->hostAPIC.isX2) {   // Don't need to wait in X2APIC mode
-                  for (timeout = 0; --timeout != 0;) { // wait for LAPIC idle
-                     if (!(APIC_Read(&vm->hostAPIC, APICR_ICRLO)
-                           & APIC_ICRLO_STATUS_MASK)) {
-                        break;
-                     }
-                  }
-               }
-               TS_ASSERT(timeout != 0);
-               // send NMI to self - (shorthand doesn't work)
-               APIC_WriteICR(
-                  &vm->hostAPIC,
-                  APIC_ReadID(&vm->hostAPIC),
-                  (  (EXC_NMI << APIC_ICRLO_VECTOR_OFFSET)
-                     & APIC_ICRLO_VECTOR_MASK)
-                  | (  (APIC_DELMODE_NMI << APIC_ICRLO_DELMODE_OFFSET)
-                       & APIC_ICRLO_DELMODE_MASK));
-               for (timeout = 0; --timeout != 0;) {   // wait for NMI delivery
-                  if (TaskGotException(crosspage, EXC_NMI)) {
-                     break;
-                  }
-               }
-               TS_ASSERT(timeout != 0);
-            }
-         }
-
-         /*
-          * If this section is enabled, it will force an NMI loop on each
-          * switch so we can test each callback to make sure it can
-          * survive a loop.
-          */
-         if (FALSE && vmx86_debug) {
-            if (!loopForced) {
-               loopForced = TRUE;
-               TaskSetException(crosspage, EXC_NMI, TRUE);
-            }
          }
 
          /*
@@ -2023,13 +1959,28 @@ Task_Switch(VMDriver *vm,  // IN
          TS_ASSERT(SELECTOR_TABLE(ss) == SELECTOR_GDT);
 
          DEBUG_ONLY(crosspage->crosspageData.tinyStack[0] = 0xDEADBEEF;)
-            TaskSwitchToMonitor(crosspage);
+         /* Running in host context prior to TaskSwitchToMonitor() */
+         TaskSwitchToMonitor(crosspage);
+         /* Running in host context after to TaskSwitchToMonitor() */
+
          TS_ASSERT(crosspage->crosspageData.tinyStack[0] == 0xDEADBEEF);
+
+         /*
+          * Temporarily disable single-step stress as VMX/VMCS change code
+          * ASSERTS on RFLAGS content without allowing TF/RF to be set.
+          */
+         if (WS_INTR_STRESS) {
+            TaskDisableTF();
+         }
 
          if (needVMXOFF) {
             VMXOFF();
          } else if (foreignVMCS != ~0ULL) {
             VMPTRLD_UNCHECKED(&foreignVMCS);
+         }
+         
+         if (WS_INTR_STRESS) {
+            TaskEnableTF();
          }
 
          if (crosspage->crosspageData.activateSVM) {
@@ -2094,7 +2045,7 @@ Task_Switch(VMDriver *vm,  // IN
          SET_KernelGS64(kgs64);
 
          /* Restore debug registers and host's IDT; turn off stress test. */
-         if (WS_NMI_STRESS) {
+         if (WS_INTR_STRESS) {
             TaskDisableTF();
          }
 
@@ -2117,35 +2068,53 @@ Task_Switch(VMDriver *vm,  // IN
          vm->currentHostCpu[vcpuid] = INVALID_PCPU;
 
          /*
-          * If we got an NMI, do an INT 2 so the host will see it.
-          * Theoretically, since the switchNMI handlers return with
-          * POPF/LRET instead of IRET, and we don't execute any IRET
-          * (unless we need to change VIF/VIP -- see BackToHost), NMI
-          * delivery should still be inhibited by the PCPU.  So using an
-          * INT 2 to forward the NMI to the host should work as NMI
-          * delivery is still inhibited.
+          * If an #NMI or #MCE was logged while switching, re-raise such an
+          * interrupt or exception for the host to consume.  Handlers preserve
+          * NMI-blocking (when not stress-testing or changing VIP/VIP) by using
+          * synthetic irets instead of real irets.  By this point, if an NMI
+          * was received during switching, NMIs should still be blocked.
           *
-          * Don't bother with the INT 2 if stress testing or the host (Linux
-          * anyway) will bleep out a log message each time.
+          * When stress testing, NMIs are almost guaranteed to be synthetic, so
+          * no NMI is raised.
           *
-          * Likewise, if MCE, do an INT 18.
+          * If a #UD was logged while switching, warn accordingly rather than
+          * raising a new exception as this would likely panic the host kernel.
           */
 
          if (UNLIKELY(TaskGotException(crosspage, EXC_NMI))) {
             TaskSetException(crosspage, EXC_NMI, FALSE);
-            if (!WS_NMI_STRESS && !loopForced) {
+            if (!WS_INTR_STRESS) {
                RAISE_INTERRUPT(EXC_NMI);
             }
          }
 
          if (UNLIKELY(TaskGotException(crosspage, EXC_MC))) {
             TaskSetException(crosspage, EXC_MC, FALSE);
-            if (!WS_NMI_STRESS && !loopForced) {
-               if (vmx86_debug) {
-                  CP_PutStr("Task_Switch*: forwarding MCE to host\n");
-               }
-               RAISE_INTERRUPT(EXC_MC);
+            if (vmx86_debug) {
+               CP_PutStr("Task_Switch: forwarding MCE to host\n");
             }
+            RAISE_INTERRUPT(EXC_MC);
+         }
+         if (UNLIKELY(TaskGotException(crosspage, EXC_UD))) {
+            Warning("#UD occurred on switch back to host; dumping core");
+         }
+         /*
+          * The NMI/MCE checks above are special cases for interrupts
+          * received during worldswitch.  Here is the more generic case
+          * of forwarding NMIs received while executing the VMM/guest.
+          */
+         if (crosspage->crosspageData.moduleCallType == MODULECALL_INTR &&
+             crosspage->crosspageData.args[0] == EXC_NMI) {
+            /*
+             * If VMM was interrupted by an NMI, do the INT 2 so the
+             * host will handle it, but then return immediately to the
+             * VMM in case the VMM was in the middle of a critical
+             * region.  E.g. the NMI may have interrupted the VMM while
+             * an interrupt was in service, before the VMM or host has
+             * done the EOI.
+             */
+            RAISE_INTERRUPT(EXC_NMI);
+            crosspage->crosspageData.retryWorldSwitch = TRUE;
          }
       } while (UNLIKELY(TaskShouldRetryWorldSwitch(crosspage)));
    }
@@ -2159,7 +2128,6 @@ Task_Switch(VMDriver *vm,  // IN
 #ifdef _WIN64
       if (crosspage->crosspageData.args[0] <= 0xFF &&
           (crosspage->crosspageData.args[0] >= 0x14 ||
-           crosspage->crosspageData.args[0] == EXC_NMI ||
            crosspage->crosspageData.args[0] == EXC_MC)) {
          RAISE_INTERRUPT(crosspage->crosspageData.args[0]);
       } else {
@@ -2183,13 +2151,6 @@ Task_Switch(VMDriver *vm,  // IN
       switch (crosspage->crosspageData.args[0]) {
          // These are the general IO interrupts
          // It would be nice to generate this dynamically, but see Note2 above.
-
-         /*
-          * The NMI/MCE checks above are special cases for interrupts
-          * received during worldswitch.  Here is the more generic
-          * case of forwarding interrupts received in monitor C code.
-          */
-         IRQ_INT(EXC_NMI);
 
          /*
           * Pass Machine Check Exception (Interrupt 0x12) to the host.

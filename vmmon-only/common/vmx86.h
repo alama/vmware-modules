@@ -1,5 +1,5 @@
 /*********************************************************
- * Copyright (C) 1998-2013 VMware, Inc. All rights reserved.
+ * Copyright (C) 1998-2013,2015 VMware, Inc. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License as published by the
@@ -113,22 +113,23 @@ extern int Vmx86_RunVM(VMDriver *vm, Vcpuid vcpuid);
 extern void Vmx86_YieldToSet(VMDriver *vm, Vcpuid currVcpu, const VCPUSet *req,
                              uint32 usecs, Bool skew);
 extern void Vmx86_ReadTSCAndUptime(VmTimeStart *st);
+extern uint32 Vmx86_ComputekHz(uint64 cycles, uint64 uptime);
 extern uint32 Vmx86_GetkHzEstimate(VmTimeStart *st);
 extern int Vmx86_SetHostClockRate(VMDriver *vm, int rate);
 extern int Vmx86_LockPage(VMDriver *vm,
                           VA64 uAddr,
                           Bool allowMultipleMPNsPerVA,
-                          MPN64 *mpn);
+                          MPN *mpn);
 extern int Vmx86_UnlockPage(VMDriver *vm, VA64 uAddr);
-extern int Vmx86_UnlockPageByMPN(VMDriver *vm, MPN64 mpn, VA64 uAddr);
-extern MPN64 Vmx86_GetRecycledPage(VMDriver *vm);
-extern int Vmx86_ReleaseAnonPage(VMDriver *vm, MPN64 mpn);
+extern int Vmx86_UnlockPageByMPN(VMDriver *vm, MPN mpn, VA64 uAddr);
+extern MPN Vmx86_GetRecycledPage(VMDriver *vm);
+extern int Vmx86_ReleaseAnonPage(VMDriver *vm, MPN mpn);
 extern int Vmx86_AllocLockedPages(VMDriver *vm, VA64 addr,
 				  unsigned numPages, Bool kernelMPNBuffer,
                                   Bool ignoreLimits);
 extern int Vmx86_FreeLockedPages(VMDriver *vm, VA64 addr,
 				 unsigned numPages, Bool kernelMPNBuffer);
-extern MPN64 Vmx86_GetNextAnonPage(VMDriver *vm, MPN64 mpn);
+extern MPN Vmx86_GetNextAnonPage(VMDriver *vm, MPN mpn);
 extern int Vmx86_GetLockedPageList(VMDriver *vm, VA64 uAddr,
 				   unsigned int numPages);
 
@@ -144,7 +145,7 @@ extern void Vmx86_Admit(VMDriver *curVM, VMMemInfoArgs *args);
 extern Bool Vmx86_Readmit(VMDriver *curVM, OvhdMem_Deltas *delta);
 extern void Vmx86_UpdateMemInfo(VMDriver *curVM,
                                 const VMMemMgmtInfoPatch *patch);
-extern void Vmx86_Add2MonPageTable(VMDriver *vm, VPN vpn, MPN64 mpn,
+extern void Vmx86_Add2MonPageTable(VMDriver *vm, VPN vpn, MPN mpn,
 				   Bool readOnly);
 extern Bool Vmx86_PAEEnabled(void);
 extern Bool Vmx86_VMXEnabled(void);

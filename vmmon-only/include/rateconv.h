@@ -42,6 +42,7 @@
 
 #include "vm_basic_types.h"
 #include "vm_basic_asm.h"
+#include "vm_assert.h"
 #include "vm_atomic.h"
 
 /* RateConv_Params is part of vmx<->vmmon interface (INIT_PSEUDO_TSC ioctl) */

@@ -34,7 +34,7 @@ extern int Task_InitCrossGDT(struct InitCrossGDT *initCrossGDT);
 extern void Task_Switch(VMDriver *vm, Vcpuid vcpuid);
 extern Bool Task_Initialize(void);
 extern void Task_Terminate(void);
-extern MPN64 Task_GetHVRootPageForPCPU(uint32 pCPU);
+extern MPN Task_GetHVRootPageForPCPU(uint32 pCPU);
 extern Descriptor *Task_GetTmpGDT(uint32 pCPU);
 
 #endif

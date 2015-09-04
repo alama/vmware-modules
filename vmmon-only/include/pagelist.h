@@ -1,5 +1,5 @@
 /*********************************************************
- * Copyright (C) 2010-2013 VMware, Inc. All rights reserved.
+ * Copyright (C) 2010-2014 VMware, Inc. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License as published by the
@@ -34,54 +34,64 @@
 #include "includeCheck.h"
 
 #include "vm_assert.h"
+#include "vmcore_types.h"
 
 /*
  * Sets of pages are passed between the monitor and the platform to be 
  * shared, invalidated, remapped, or swapped.
  *
- * The upper bit of each (tagged) BPN is used to encode specific state 
- * about each page:
- *
- *     bit 31: the entry has been voided/rejected
- *
  * A set is sized so that it fits in a 4KB page.
  */
 
-#define PAGELIST_MAX     512
-#define PAGELIST_VOID    (1 << 31)
+#pragma pack(push, 1)
+typedef struct PageListEntry {
+   CompressedBPN cbpn;
+   Bool voided;
+   uint8 _pad[2];
+} PageListEntry;
+#pragma pack(pop) 
 
-MY_ASSERTS(PAGELISTDEFS, 
-           ASSERT_ON_COMPILE(PAGELIST_MAX * sizeof(BPN) <= PAGE_SIZE);)
+#define PAGELIST_MAX     (PAGE_SIZE / sizeof(PageListEntry))
+
+static INLINE PageListEntry
+PageList_CreateEntry(BPN bpn)
+{
+   PageListEntry ple;
+   CompressedBPN_Write(&ple.cbpn, bpn);
+   ple.voided = FALSE;
+   return ple;
+}   
 
 static INLINE BPN
-PageList_VoidBPN(BPN bpn) 
+PageList_BPN(const PageListEntry *ple)
 {
-   return bpn | PAGELIST_VOID;
-}
-
-static INLINE BPN
-PageList_BPN(BPN taggedBPN)
-{
-   return taggedBPN & ~PAGELIST_VOID;
+   return CompressedBPN_Read(&ple->cbpn);
 }
 
 static INLINE Bool
-PageList_IsVoid(BPN taggedBPN)
+PageList_IsVoid(const PageListEntry *ple)
 {
-   return (taggedBPN & PAGELIST_VOID) != 0;
+   ASSERT(ple->voided == TRUE || ple->voided == FALSE);
+   return ple->voided;
 }
+
+static INLINE void
+PageList_VoidEntry(PageListEntry *ple)
+{
+   ple->voided = TRUE;
+}
+
 
 /*
  * This function inspects the set of BPN between entry [0,i) in the page list
  * and returns TRUE if any of them matches the provided BPN.
  */
 static INLINE Bool
-PageList_IsBPNDup(const BPN *bpnList, unsigned i, BPN bpn)
+PageList_IsBPNDup(const PageListEntry *pageList, unsigned i, BPN bpn)
 {
    unsigned k;
-   ASSERT(!PageList_IsVoid(bpn));
    for (k = 0; k < i; k++) {
-      if (PageList_BPN(bpnList[k]) == bpn) {
+      if (PageList_BPN(&pageList[k]) == bpn) {
          return TRUE;
       }
    }

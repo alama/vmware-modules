@@ -1,6 +1,6 @@
 #!/usr/bin/make -f
 ##########################################################
-# Copyright (C) 1998 VMware, Inc. All rights reserved.
+# Copyright (C) 1998,2015 VMware, Inc. All rights reserved.
 #
 # This program is free software; you can redistribute it and/or modify it
 # under the terms of the GNU General Public License as published by the
@@ -72,6 +72,7 @@ INCLUDE += $(shell $(CC) $(INCLUDE) -E $(SRCROOT)/autoconf/geninclude.c \
 	   | sed -n -e 's!^APATH!-I$(HEADER_DIR)/asm!p')
 
 CC_OPTS += $(call vm_check_build, $(SRCROOT)/autoconf/smpcall.c, -DVMW_HAVE_SMP_CALL_3ARG, )
+CC_OPTS += $(call vm_check_build, $(SRCROOT)/autoconf/tsc_khz.c, -DVMW_HAVE_TSC_KHZ, )
 
 C_TARGETS_LINUX  := driver.o hostif.o driverLog.o
 C_TARGETS_COMMON := vmx86.o memtrack.o phystrack.o cpuid.o task.o hashFunc.o
