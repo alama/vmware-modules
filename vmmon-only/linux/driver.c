@@ -381,9 +381,7 @@ cleanup_module(void)
 #ifdef VMX86_DEVEL
    unregister_chrdev(linuxState.major, linuxState.deviceName);
 #else
-   if (misc_deregister(&linuxState.misc)) {
-      Warning("Module %s: error unregistering\n", linuxState.deviceName);
-   }
+   misc_deregister(&linuxState.misc);
 #endif
 
    Log("Module %s: unloaded\n", linuxState.deviceName);
