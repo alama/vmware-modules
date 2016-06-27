@@ -113,8 +113,14 @@ UserifLockPage(VA addr) // IN
    int retval;
 
    down_read(&current->mm->mmap_sem);
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4,6,0)
+   retval = get_user_pages_remote(current, current->mm, addr,
+			   1, 1, 0, &page, NULL);
+
+#else
    retval = get_user_pages(current, current->mm, addr,
 			   1, 1, 0, &page, NULL);
+#endif
    up_read(&current->mm->mmap_sem);
 
    if (retval != 1) {
