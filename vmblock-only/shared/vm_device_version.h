@@ -53,7 +53,9 @@
  *    VMware HD Audio codec
  *    VMware HD Audio controller
  */
-#define PCI_VENDOR_ID_VMWARE                    0x15AD
+#ifndef PCI_VENDOR_ID_VMWARE
+//#define PCI_VENDOR_ID_VMWARE                    0x15AD
+#endif
 #define PCI_DEVICE_ID_VMWARE_SVGA2              0x0405
 #define PCI_DEVICE_ID_VMWARE_SVGA               0x0710
 #define PCI_DEVICE_ID_VMWARE_VGA                0x0711
