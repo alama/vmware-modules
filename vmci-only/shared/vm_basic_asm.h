@@ -95,7 +95,7 @@ lssb32_0(const uint32 value)
    __analysis_assume(ret != 0);
 #endif
 
-#pragma warning(suppress: 6102) // Suppress bogus complaint that idx may be uninitialized in error case
+#pragma warning(suppress: 6001 6102) // Suppress bogus complaint that idx may be uninitialized in error case
    return idx;
 }
 
@@ -113,7 +113,7 @@ mssb32_0(const uint32 value)
    __analysis_assume(ret != 0);
 #endif
 
-#pragma warning(suppress: 6102) // Suppress bogus complaint that idx may be uninitialized in error case
+#pragma warning(suppress: 6001 6102) // Suppress bogus complaint that idx may be uninitialized in error case
    return idx;
 }
 
@@ -132,7 +132,7 @@ lssb64_0(const uint64 value)
       __analysis_assume(ret != 0);
 #endif
 
-#pragma warning(suppress: 6102) // Suppress bogus complaint that idx may be uninitialized in error case
+#pragma warning(suppress: 6001 6102) // Suppress bogus complaint that idx may be uninitialized in error case
       return idx;
 #else
       /* The coding was chosen to minimize conditionals and operations */
@@ -163,7 +163,7 @@ mssb64_0(const uint64 value)
       __analysis_assume(ret != 0);
 #endif
 
-#pragma warning(suppress: 6102) // Suppress bogus complaint that idx may be uninitialized in error case
+#pragma warning(suppress: 6001 6102) // Suppress bogus complaint that idx may be uninitialized in error case
       return idx;
 #else
       /* The coding was chosen to minimize conditionals and operations */

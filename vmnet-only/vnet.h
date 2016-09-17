@@ -117,6 +117,7 @@ enum VMNetSockOpt {
    VMNET_SO_SETUSERLISTENER,
    VMNET_SO_MCASTFILTER,
    VMNET_SO_INJECTLINKSTATE,
+   VMNET_SO_BRFILTER,
 };
 
 /*
@@ -225,6 +226,17 @@ typedef struct VNetMcastFilter {
    uint32 ladrf[2];
    uint8  exactFilter[VNET_MAX_EXACT_FILTER_LEN][6];
 } VNetMcastFilter;
+#pragma pack(pop)
+
+/* Filter in Vmnet layer */
+#define VNET_FILTER_ACTION_BRIDGE_HOST_BLOCK 0x1
+#define VNET_FILTER_ACTION_BRIDGE_VM_BLOCK   0x2
+
+#pragma pack(push, 1)
+typedef struct MACVNetPortFilterArgs {
+   int enable;
+   int vnetNum;
+} MACVNetPortFilterArgs;
 #pragma pack(pop)
 
 /*

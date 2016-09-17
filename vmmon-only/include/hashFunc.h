@@ -1,5 +1,5 @@
 /*********************************************************
- * Copyright (C) 2001 VMware, Inc. All rights reserved.
+ * Copyright (C) 2001,2016 VMware, Inc. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License as published by the
@@ -164,7 +164,7 @@ static INLINE ub8 hash(register const ub1 *k, /* the key */
   /* Set up the internal state */
   len = length;
   a = b = level;                         /* the previous hash value */
-  c = CONST64(0x9e3779b97f4a7c13); /* the golden ratio; an arbitrary value */
+  c = CONST64U(0x9e3779b97f4a7c13); /* the golden ratio; an arbitrary value */
 
   /*---------------------------------------- handle most of the key */
   while (len >= 24)
@@ -233,7 +233,7 @@ static INLINE ub8 hash2(register const ub8 *k, /* the key */
   /* Set up the internal state */
   len = length;
   a = b = level;                         /* the previous hash value */
-  c = CONST64(0x9e3779b97f4a7c13); /* the golden ratio; an arbitrary value */
+  c = CONST64U(0x9e3779b97f4a7c13); /* the golden ratio; an arbitrary value */
 
   /*---------------------------------------- handle most of the key */
   while (len >= 3)
@@ -278,7 +278,7 @@ static INLINE ub8 hash3(register const ub1 *k, /* the key */
   /* Set up the internal state */
   len = length;
   a = b = level;                         /* the previous hash value */
-  c = CONST64(0x9e3779b97f4a7c13); /* the golden ratio; an arbitrary value */
+  c = CONST64U(0x9e3779b97f4a7c13); /* the golden ratio; an arbitrary value */
 
   /*---------------------------------------- handle most of the key */
   if (((size_t)k)&7)

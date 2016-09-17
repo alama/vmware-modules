@@ -1,5 +1,5 @@
 /*********************************************************
- * Copyright (C) 1998-2015 VMware, Inc. All rights reserved.
+ * Copyright (C) 1998-2016 VMware, Inc. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License as published by the
@@ -620,7 +620,6 @@ gotnzss:;
 
 static INLINE_SINGLE_CALLER void
 TaskRestoreHostGDTTRLDT(Descriptor *tempGDTBase,
-                        VMCrossPage *crosspage,
                         DTR64 hostGDT64,
                         Selector ldt,
                         Selector cs,
@@ -1107,15 +1106,9 @@ TaskEnableTF(void)
 #if defined(__GNUC__)
    asm volatile ("pushfq ; orb $1,1(%rsp) ; popfq");
 #elif defined(_MSC_VER)
-   static CODE_BUF uint8 const setTFCode64[] = {
-      0x9C,                          // pushfq
-      0x80, 0x4C, 0x24, 0x01, 0x01,  // orb $1,1(%rsp)
-      0x9D,                          // popfq
-      0xC3 };                        // retq
-
-   ((void (*)(void))setTFCode64)();
+   __writeeflags(__readeflags() | EFLAGS_TF);
 #else
-#error no compiler for setting stress flag
+#error no compiler support for setting TF
 #endif
 }
 
@@ -1142,15 +1135,9 @@ TaskDisableTF(void)
 #if defined(__GNUC__)
    asm volatile ("pushfq ; andb $~1,1(%rsp) ; popfq");
 #elif defined(_MSC_VER)
-   static CODE_BUF uint8 const clrTFCode64[] = {
-      0x9C,                          // pushfq
-      0x80, 0x64, 0x24, 0x01, 0xFE,  // andb $~1,1(%rsp)
-      0x9D,                          // popfq
-      0xC3 };                        // retq
-
-   ((void (*)(void))clrTFCode64)();
+   __writeeflags(__readeflags() & ~EFLAGS_TF);
 #else
-#error no compiler for clearing stress flag
+#error no compiler support for clearing TF
 #endif
 }
 
@@ -1592,7 +1579,7 @@ TaskSwitchToMonitor(VMCrossPage *crosspage)
     * The 64-bit calling convention is to pass the argument in RCX and that
     * the called function must preserve RBX,RSI,RDI,RBP,RSP,R12..R15.
     */
-
+#pragma warning(suppress: 4055) // Cast of data pointer to function pointer.
    (*(void (*)(VMCrossPage *))codePtr)(crosspage);
 #else
 #error No compiler defined for TaskSwitchToMonitor
@@ -2026,7 +2013,7 @@ Task_Switch(VMDriver *vm,  // IN
           * bit needs to be fiddled with.  Also restore host LDT while we're
           * at it.
           */
-         TaskRestoreHostGDTTRLDT(tempGDTBase, crosspage, hostGDT64,
+         TaskRestoreHostGDTTRLDT(tempGDTBase, hostGDT64,
                                  hostLDT, cs, hostTR);
 
          SET_DS(ds);
@@ -2129,7 +2116,7 @@ Task_Switch(VMDriver *vm,  // IN
       if (crosspage->crosspageData.args[0] <= 0xFF &&
           (crosspage->crosspageData.args[0] >= 0x14 ||
            crosspage->crosspageData.args[0] == EXC_MC)) {
-         RAISE_INTERRUPT(crosspage->crosspageData.args[0]);
+         RAISE_INTERRUPT((unsigned char)crosspage->crosspageData.args[0]);
       } else {
          Warning("%s: Received Unexpected Interrupt: 0x%"FMT64"X\n",
                  __FUNCTION__, crosspage->crosspageData.args[0]);

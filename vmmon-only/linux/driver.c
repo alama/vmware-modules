@@ -1,5 +1,5 @@
 /*********************************************************
- * Copyright (C) 1998-2015 VMware, Inc. All rights reserved.
+ * Copyright (C) 1998-2016 VMware, Inc. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License as published by the
@@ -1656,7 +1656,7 @@ LinuxDriver_Ioctl(struct file *filp,    // IN:
    }
 
    case IOCTL_VMX86_SET_HOST_CLOCK_RATE:
-      retval = -Vmx86_SetHostClockRate(vm, (int)ioarg);
+      retval = -Vmx86_SetHostClockRate(vm, (unsigned)ioarg);
       break;
 
    case IOCTL_VMX86_SEND_IPI: {

@@ -1,5 +1,5 @@
 /*********************************************************
- * Copyright (C) 1998-2013,2015 VMware, Inc. All rights reserved.
+ * Copyright (C) 1998-2013,2015-2016 VMware, Inc. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License as published by the
@@ -17,8 +17,8 @@
  *********************************************************/
 
 /*
- *  vmx86.h - Platform independent data and interface for supporting 
- *            the vmx86 device driver. 
+ *  vmx86.h - Platform independent data and interface for supporting
+ *            the vmx86 device driver.
  */
 
 #ifndef VMX86_H
@@ -115,7 +115,7 @@ extern void Vmx86_YieldToSet(VMDriver *vm, Vcpuid currVcpu, const VCPUSet *req,
 extern void Vmx86_ReadTSCAndUptime(VmTimeStart *st);
 extern uint32 Vmx86_ComputekHz(uint64 cycles, uint64 uptime);
 extern uint32 Vmx86_GetkHzEstimate(VmTimeStart *st);
-extern int Vmx86_SetHostClockRate(VMDriver *vm, int rate);
+extern int Vmx86_SetHostClockRate(VMDriver *vm, unsigned rate);
 extern int Vmx86_LockPage(VMDriver *vm,
                           VA64 uAddr,
                           Bool allowMultipleMPNsPerVA,

@@ -1,5 +1,5 @@
 /*********************************************************
- * Copyright (C) 1998-2015 VMware, Inc. All rights reserved.
+ * Copyright (C) 1998-2016 VMware, Inc. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License as published by the
@@ -73,9 +73,9 @@ PseudoTSC pseudoTSC;
 static VMDriver *vmDriverList = NULL;
 
 static LockedPageLimit lockedPageLimit = {
-   0,                // host: does not need to be initialized.
-   0,                // configured: must be set by some VM as it is powered on.
-   MAX_LOCKED_PAGES, // dynamic
+   0,                        // host: does not need to be initialized.
+   0,                        // configured: must be set by some VM as it is powered on.
+   (uint32)MAX_LOCKED_PAGES, // dynamic
 };
 
 /* Percentage of guest "paged" memory that must fit within the hard limit. */
@@ -1114,7 +1114,7 @@ Vmx86_GetkHzEstimate(VmTimeStart *st)	// IN: start time
 
 int
 Vmx86_SetHostClockRate(VMDriver *vm,  // IN: VM instance pointer
-                       int rate)      // IN: rate in Hz
+                       unsigned rate) // IN: rate in Hz
 {
    unsigned newGlobalRate;
    VMDriver *cur;
@@ -1777,7 +1777,7 @@ Vmx86_GetMemInfo(VMDriver *curVM,
    outArgs->lockedPageLimit = lockedPageLimit;
    outArgs->globalMinAllocation = Vmx86CalculateGlobalMinAllocation(minVmMemPct);
    outArgs->minVmMemPct = minVmMemPct;
-   outArgs->callerIndex = -1;
+   outArgs->callerIndex = (uint32)-1;
    outArgs->currentTime = HostIF_ReadUptime() / HostIF_UptimeFrequency();
 
    if (curVM == NULL) {
