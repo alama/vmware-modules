@@ -1163,9 +1163,8 @@ HostIFGetUserPages(void *uvAddr,          // IN
    int retval;
 
    down_read(&current->mm->mmap_sem);
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(4,6,0)
-   retval = get_user_pages_remote(current, current->mm, (unsigned long)uvAddr,
-                           numPages, 0, 0, ppages, NULL);
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 6, 0)
+   retval = get_user_pages((unsigned long)uvAddr, numPages, 0, 0, ppages, NULL);
 #else
    retval = get_user_pages(current, current->mm, (unsigned long)uvAddr,
                            numPages, 0, 0, ppages, NULL);
@@ -1595,7 +1594,12 @@ HostIF_EstimateLockedPageLimit(const VMDriver* vm,                // IN
                               global_page_state(NR_SLAB_UNRECLAIMABLE) +
                               global_page_state(NR_UNEVICTABLE) +
                               hugePages + reservedPages;
-   unsigned int anonPages = global_page_state(NR_ANON_PAGES); 
+   unsigned int anonPages =
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 8, 0)
+      global_page_state(NR_ANON_MAPPED);
+#else
+      global_page_state(NR_ANON_PAGES);
+#endif
    unsigned int swapPages = BYTES_2_PAGES(linuxState.swapSize);
 
    if (anonPages > swapPages) {

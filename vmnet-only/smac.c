@@ -35,6 +35,7 @@
 
 #define BINARY_COMPATIBLE 0 // NT-only driver (optimizes some NDIS calls)
 #include <ndis.h>
+#include <ntstrsafe.h>
 
 #include "vnetInt.h"
 
@@ -81,7 +82,7 @@
 #define LOWERIRQL()         do { KeLowerIrql(irql); } while(0)
 #define FREESPINLOCK(a)     do { NdisFreeSpinLock( (a) ); } while(0)
 #define ASSERTLOCKHELD()    ASSERT(KeGetCurrentIrql() == DISPATCH_LEVEL)
-#define SNPRINTF(a)            (_snprintf a)
+#define SNPRINTF(a)            (RtlStringCbPrintfA a)
 
 #elif defined __linux__ || defined __APPLE__
 
@@ -404,12 +405,15 @@ static Bool CopyDataToClonedPacket(SMACPackets *packets, const void *source,
 				   uint32 offset, uint32 length);
 
 /* write data to source (on Windows) / write data to clone (on Linux) */
-static Bool CopyDataForPacketFromHost(SMACPackets *packets, uint32 changeNum, 
+static Bool CopyDataForPacketFromHost(SMACPackets *packets, uint32 changeNum,
 				      uint32 offset, const uint8 *macAddress);
 
 static EthClass LookupTypeClass(uint16 typeValue);
 #ifdef DBG
-static EthClass LookupTypeName(uint16 typeValue, char *type);
+#ifdef _WIN32
+_At_(type, _In_z_bytecount_(typeLen))
+#endif
+static void LookupTypeName(uint16 typeValue, char *type, size_t typeLen);
 #endif
 
 
@@ -1044,9 +1048,9 @@ RemoveIPfromHashTableNoAcquireLock(SMACState *state,                 // IN: stat
 static void
 TrimLookupTableIfNecessary(SMACState *state) // IN: smac state
 {
-   IPmacLookupEntry * oldestEntry = NULL; // oldest entry found
-   SmacLastAccess oldestUpdate = ~0;	  // age of oldest entry
-   SmacLastAccess currentUptime = 0;      // time since the system was booted
+   IPmacLookupEntry * oldestEntry = NULL;      // oldest entry found
+   SmacLastAccess oldestUpdate = (uint64)~0;	  // age of oldest entry
+   SmacLastAccess currentUptime = 0;           // time since the system was booted
    int i;
 
    VNETKdPrintCall(("TrimLookupTableIfNecessary"));
@@ -1584,54 +1588,54 @@ SMAC_CheckPacketFromHost(SMACState *state,       // IN: pointer to state
 
 #ifdef DBG
       if (typeClass != EthClassCommon) { // print only if not a common type
-	 char type[50] = ""; // holds textual name of type
-	 LookupTypeName(NTOHS(eh.lengthType), type); // lookup ethernet type
-	 VNETKdPrint((MODULE_NAME "FromHost: non-IP & non-ARP %s "
-	              "%02x:%02x:%02x:%02x:%02x:%02x -> "
-		      "%02x:%02x:%02x:%02x:%02x:%02x %s\n",
+         char type[50] = ""; // holds textual name of type
+         LookupTypeName(NTOHS(eh.lengthType), type, sizeof type); // lookup ethernet type
+         VNETKdPrint((MODULE_NAME "FromHost: non-IP & non-ARP %s "
+                      "%02x:%02x:%02x:%02x:%02x:%02x -> "
+                      "%02x:%02x:%02x:%02x:%02x:%02x %s\n",
                       (IS_MULTICAST(eh.destAddr) || IS_BROADCAST(eh.destAddr))?
-		      "(b|m)cast":"ucast", 
-		      eh.srcAddr[0], eh.srcAddr[1], eh.srcAddr[2], 
-		      eh.srcAddr[3], eh.srcAddr[4], eh.srcAddr[5], 
-		      eh.destAddr[0], eh.destAddr[1], eh.destAddr[2], 
-		      eh.destAddr[3], eh.destAddr[4], eh.destAddr[5], type));   
+                      "(b|m)cast":"ucast",
+                      eh.srcAddr[0], eh.srcAddr[1], eh.srcAddr[2],
+                      eh.srcAddr[3], eh.srcAddr[4], eh.srcAddr[5],
+                      eh.destAddr[0], eh.destAddr[1], eh.destAddr[2],
+                      eh.destAddr[3], eh.destAddr[4], eh.destAddr[5], type));
       }
 #endif /* DBG */
 
       /*
-       * Let these unrecognized packets through only if they are broadcast or 
-       * multicast. Drop unicast packets because it's easier to debug a lack 
+       * Let these unrecognized packets through only if they are broadcast or
+       * multicast. Drop unicast packets because it's easier to debug a lack
        * of traffic than damaged traffic.
        */
 
       if (IS_MULTICAST(eh.destAddr) || IS_BROADCAST(eh.destAddr)) {
-	 VNETKdPrint((MODULE_NAME "FromHost: Forward unrecognized "
-		      "non-arp/ip b/mcast\n"));
-	 return PacketStatusForwardPacket;
+         VNETKdPrint((MODULE_NAME "FromHost: Forward unrecognized "
+                      "non-arp/ip b/mcast\n"));
+         return PacketStatusForwardPacket;
       } else {
 #ifdef DBG
-	 char type[50] = ""; // holds textual name of type
-	 LookupTypeName(NTOHS(eh.lengthType), type);
-	 VNETKdPrint((MODULE_NAME "FromHost: Dropping unrecognized "
-	              "unicast non-IP & non-ARP unicast packet: %s\n", type));
-	 VNETKdPrint((MODULE_NAME "FromHost: the non-IP & non-ARP is "
-	              "%02x:%02x:%02x:%02x:%02x:%02x -> "
-		      "%02x:%02x:%02x:%02x:%02x:%02x\n",
-		      eh.srcAddr[0], eh.srcAddr[1], eh.srcAddr[2],
-		      eh.srcAddr[3], eh.srcAddr[4], eh.srcAddr[5],
-		      eh.destAddr[0], eh.destAddr[1], eh.destAddr[2],
-		      eh.destAddr[3], eh.destAddr[4], eh.destAddr[5]));
+         char type[50] = ""; // holds textual name of type
+         LookupTypeName(NTOHS(eh.lengthType), type, sizeof type);
+         VNETKdPrint((MODULE_NAME "FromHost: Dropping unrecognized "
+                      "unicast non-IP & non-ARP unicast packet: %s\n", type));
+         VNETKdPrint((MODULE_NAME "FromHost: the non-IP & non-ARP is "
+                      "%02x:%02x:%02x:%02x:%02x:%02x -> "
+                      "%02x:%02x:%02x:%02x:%02x:%02x\n",
+                      eh.srcAddr[0], eh.srcAddr[1], eh.srcAddr[2],
+                      eh.srcAddr[3], eh.srcAddr[4], eh.srcAddr[5],
+                      eh.destAddr[0], eh.destAddr[1], eh.destAddr[2],
+                      eh.destAddr[3], eh.destAddr[4], eh.destAddr[5]));
 #endif
-	 /*
-	  * Drop non-IP/non-ARP unicast packets, unless we've been
-	  * requested to forward unknown/unrecognized packets.
-	  */
+         /*
+          * Drop non-IP/non-ARP unicast packets, unless we've been
+          * requested to forward unknown/unrecognized packets.
+          */
 
-	 if (state->smacForwardUnknownPackets) {
-	    return PacketStatusForwardPacket;
-	 } else {
-	    return PacketStatusDropPacket;
-	 }
+         if (state->smacForwardUnknownPackets) {
+            return PacketStatusForwardPacket;
+         } else {
+            return PacketStatusDropPacket;
+         }
       }
    }
 
@@ -1665,16 +1669,16 @@ SMAC_CheckPacketFromHost(SMACState *state,       // IN: pointer to state
          }
 
          ipVer = ipHeader[0] >> 4;              // IP header ver
-         ipHeaderLen = 4 * (ipHeader[0] & 0xf); // IP header length 
-         
+         ipHeaderLen = 4 * (ipHeader[0] & 0xf); // IP header length
+
          /*
           * Verify basic fields in IP header
           */
-         
-         if (ipVer != 4 || ipHeaderLen < 20 || 
+
+         if (ipVer != 4 || ipHeaderLen < 20 ||
              GetPacketLength(packet) - ETH_HLEN < ipHeaderLen) {
-            VNETKdPrint((MODULE_NAME "FromHostIP: got an IP version %d, "
-                         "or len %d < reported len %d\n", ipVer, 
+            VNETKdPrint((MODULE_NAME "FromHostIP: got an IP version %u, "
+                         "or len %u < reported len %u\n", ipVer,
                          GetPacketLength(packet) - ETH_HLEN, ipHeaderLen));
             if ((GetPacketLength(packet) - ETH_HLEN) < ipHeaderLen) {
 
@@ -1715,7 +1719,7 @@ SMAC_CheckPacketFromHost(SMACState *state,       // IN: pointer to state
          if (ipv6Ver != IPv6 || GetPacketLength(packet) < ETH_HLEN +
                                                           IPv6_HEADER_LEN) {
             VNETKdPrint((MODULE_NAME "FromHostIP:  got an IP version %u, or "
-                         "length %u less than minimum length %u.\n", ipv6Ver,
+                         "length %u less than minimum length %d.\n", ipv6Ver,
                          GetPacketLength(packet), ETH_HLEN + IPv6_HEADER_LEN));
             return PacketStatusDropPacket;
          }
@@ -1848,10 +1852,10 @@ SMAC_CheckPacketFromHost(SMACState *state,       // IN: pointer to state
       uint32 arpHeaderWord2; // second word in ARP header
 
       if (GetPacketLength(packet) < ETH_HLEN + ARP_HEADER_LEN) {
-	 VNETKdPrint((MODULE_NAME "FromHostARP: ARP packet is insufficient "
-	              "length of IPv4 and Ethernet, expected %d got %d\n",
-	              ETH_HLEN + ARP_HEADER_LEN, GetPacketLength(packet)));
-	 return PacketStatusTooShort;
+         VNETKdPrint((MODULE_NAME "FromHostARP: ARP packet is insufficient "
+                     "length of IPv4 and Ethernet, expected %d got %u\n",
+                     ETH_HLEN + ARP_HEADER_LEN, GetPacketLength(packet)));
+         return PacketStatusTooShort;
       }
 
       /*
@@ -1866,27 +1870,27 @@ SMAC_CheckPacketFromHost(SMACState *state,       // IN: pointer to state
       
       if (!GetPacketData(packet, ETH_HLEN, sizeof arpHeaderWord1, 
                          &arpHeaderWord1)) {
-	 VNETKdPrint((MODULE_NAME "FromHostARP: couldn't read "
-		      "ARP header #1\n"));
-	 return PacketStatusTooShort;
+         VNETKdPrint((MODULE_NAME "FromHostARP: couldn't read "
+                      "ARP header #1\n"));
+         return PacketStatusTooShort;
       }
 
-      if (arpHeaderWord1 != HTONL(0x00010800) /* ethernet */ && 
-	  arpHeaderWord1 != HTONL(0x00060800) /* ieee802  */ ) {
-	 VNETKdPrint((MODULE_NAME "FromHostARP: ARP header1 appears "
-	              "wrong, got %08x\n", arpHeaderWord1));
-	 return PacketStatusDropPacket;      
+      if (arpHeaderWord1 != HTONL(0x00010800) /* ethernet */ &&
+         arpHeaderWord1 != HTONL(0x00060800) /* ieee802  */ ) {
+         VNETKdPrint((MODULE_NAME "FromHostARP: ARP header1 appears "
+                      "wrong, got %08x\n", arpHeaderWord1));
+         return PacketStatusDropPacket;
       }
 
       /*
        * Perform action based on opcode in second word of ARP header.
        */
 
-      if (!GetPacketData(packet, ETH_HLEN + sizeof arpHeaderWord1, 
-			 sizeof arpHeaderWord2, &arpHeaderWord2)) {
-	 VNETKdPrint((MODULE_NAME "FromHostARP: couldn't read "
-		      "ARP header #2\n"));
-	 return PacketStatusTooShort;
+      if (!GetPacketData(packet, ETH_HLEN + sizeof arpHeaderWord1,
+          sizeof arpHeaderWord2, &arpHeaderWord2)) {
+         VNETKdPrint((MODULE_NAME "FromHostARP: couldn't read "
+                      "ARP header #2\n"));
+         return PacketStatusTooShort;
       }
 
 #ifdef DBG
@@ -2389,78 +2393,78 @@ SMAC_CheckPacketToHost(SMACState *state,     // IN: pointer to state
 
 #ifdef DBG
       if (typeClass != EthClassCommon) {
-	 char type[50] = ""; // holds textual name of type
-	 if (ethHeaderLen == ETH_HLEN) { // if not a vlan packet
-	    LookupTypeName(NTOHS(eh->lengthType), type);
-	 } else { // if a vlan packet
-	    uint16 actualType = *(uint16*)(((uint8*)&(eh->lengthType)) + 4);
-	    LookupTypeName(NTOHS(actualType), type);
-	 }
-	 VNETKdPrint((MODULE_NAME "  ToHost: non-IP & non-ARP "
+         char type[50] = ""; // holds textual name of type
+         if (ethHeaderLen == ETH_HLEN) { // if not a vlan packet
+            LookupTypeName(NTOHS(eh->lengthType), type, sizeof type);
+         } else { // if a vlan packet
+            uint16 actualType = *(uint16*)(((uint8*)&(eh->lengthType)) + 4);
+            LookupTypeName(NTOHS(actualType), type, sizeof type);
+         }
+         VNETKdPrint((MODULE_NAME "  ToHost: non-IP & non-ARP "
 		     "%02x:%02x:%02x:%02x:%02x:%02x -> "
 		     "%02x:%02x:%02x:%02x:%02x:%02x %s\n",
-		     eh->srcAddr[0]&0xff, eh->srcAddr[1]&0xff, 
-		     eh->srcAddr[2]&0xff, eh->srcAddr[3]&0xff, 
-		     eh->srcAddr[4]&0xff, eh->srcAddr[5]&0xff, 
-		     eh->destAddr[0]&0xff, eh->destAddr[1]&0xff, 
-		     eh->destAddr[2]&0xff, eh->destAddr[3]&0xff, 
-		     eh->destAddr[4]&0xff, eh->destAddr[5]&0xff, type));
+             eh->srcAddr[0]&0xff, eh->srcAddr[1]&0xff,
+             eh->srcAddr[2]&0xff, eh->srcAddr[3]&0xff,
+             eh->srcAddr[4]&0xff, eh->srcAddr[5]&0xff,
+             eh->destAddr[0]&0xff, eh->destAddr[1]&0xff,
+             eh->destAddr[2]&0xff, eh->destAddr[3]&0xff,
+             eh->destAddr[4]&0xff, eh->destAddr[5]&0xff, type));
       }
 #endif
 
       /*
-       * Let these unrecognized packets through only if they are broadcast or 
-       * multicast, and drop unicast packets (it's easier/debug loss of traffic 
+       * Let these unrecognized packets through only if they are broadcast or
+       * multicast, and drop unicast packets (it's easier/debug loss of traffic
        * versus corrupted/invalid traffic).
        */
 
       if (IS_MULTICAST(eh->destAddr) || IS_BROADCAST(eh->destAddr)) {
 
-	 /*
-	  * Modify the source address to be that of the wireless hardware, so
-	  * that this packet can be transmitted.  First we need to duplicate
-	  * the packet so that other VMs don't get confused about MACs that
-	  * arbitrarily change between the VM's MAC and the host's MAC.
-	  */
+         /*
+          * Modify the source address to be that of the wireless hardware, so
+          * that this packet can be transmitted.  First we need to duplicate
+          * the packet so that other VMs don't get confused about MACs that
+          * arbitrarily change between the VM's MAC and the host's MAC.
+          */
 
-	 if (!ClonePacket(packets)) {
-	    VNETKdPrint((MODULE_NAME "  ToHost: couldn't clone packet\n"));
-	    return PacketStatusDropPacket;
-	 }
+         if (!ClonePacket(packets)) {
+            VNETKdPrint((MODULE_NAME "  ToHost: couldn't clone packet\n"));
+            return PacketStatusDropPacket;
+         }
 
-	 CopyDataToClonedPacket(packets, state->macAddress, 
-			        ETH_ALEN /* offset for source MAC */, 
-			        ETH_ALEN /* length */);
-	 return PacketStatusForwardPacket;
+         CopyDataToClonedPacket(packets, state->macAddress, 
+                                ETH_ALEN /* offset for source MAC */, 
+                                ETH_ALEN /* length */);
+         return PacketStatusForwardPacket;
       } else {
 
-	 /* 
-	  * Drop the packet, but first display a status message indicating
-	  * that we're dropping this packet (largely so we know what kind/type
-	  * of traffic that we are dropping
-	  */
+         /* 
+          * Drop the packet, but first display a status message indicating
+          * that we're dropping this packet (largely so we know what kind/type
+          * of traffic that we are dropping
+          */
 
 #ifdef DBG
-	 char type[50] = ""; // holds textual name of type
-	 if (ethHeaderLen == ETH_HLEN) { // if not a vlan packet
-	    LookupTypeName(NTOHS(eh->lengthType), type);
-	 } else { // if a vlan packet
-	    uint16 actualType = *(uint16*)(((uint8*) & (eh->lengthType)) + 4);
-	    LookupTypeName(NTOHS(actualType), type);
-	 }
-	 VNETKdPrint((MODULE_NAME "  ToHost: Dropping unrecognized "
-	              "unicast non-IP & non-ARP unicast packet: %s\n", type));
-	 VNETKdPrint((MODULE_NAME "  ToHost: the non-IP & non-ARP is "
-	              "%02x:%02x:%02x:%02x:%02x:%02x -> "
-		      "%02x:%02x:%02x:%02x:%02x:%02x\n",
-		      eh->srcAddr[0]&0xff, eh->srcAddr[1]&0xff, 
-		      eh->srcAddr[2]&0xff, eh->srcAddr[3]&0xff, 
-		      eh->srcAddr[4]&0xff, eh->srcAddr[5]&0xff, 
-		      eh->destAddr[0]&0xff, eh->destAddr[1]&0xff, 
-		      eh->destAddr[2]&0xff, eh->destAddr[3]&0xff, 
-		      eh->destAddr[4]&0xff, eh->destAddr[5]&0xff));   
+         char type[50] = ""; // holds textual name of type
+         if (ethHeaderLen == ETH_HLEN) { // if not a vlan packet
+            LookupTypeName(NTOHS(eh->lengthType), type, sizeof type);
+         } else { // if a vlan packet
+            uint16 actualType = *(uint16*)(((uint8*) & (eh->lengthType)) + 4);
+            LookupTypeName(NTOHS(actualType), type, sizeof type);
+         }
+         VNETKdPrint((MODULE_NAME "  ToHost: Dropping unrecognized "
+                      "unicast non-IP & non-ARP unicast packet: %s\n", type));
+         VNETKdPrint((MODULE_NAME "  ToHost: the non-IP & non-ARP is "
+                      "%02x:%02x:%02x:%02x:%02x:%02x -> "
+                      "%02x:%02x:%02x:%02x:%02x:%02x\n",
+                      eh->srcAddr[0]&0xff, eh->srcAddr[1]&0xff, 
+                      eh->srcAddr[2]&0xff, eh->srcAddr[3]&0xff, 
+                      eh->srcAddr[4]&0xff, eh->srcAddr[5]&0xff, 
+                      eh->destAddr[0]&0xff, eh->destAddr[1]&0xff, 
+                      eh->destAddr[2]&0xff, eh->destAddr[3]&0xff, 
+                      eh->destAddr[4]&0xff, eh->destAddr[5]&0xff));   
 #endif
-	 return PacketStatusDropPacket;
+         return PacketStatusDropPacket;
       }
    }
 
@@ -2633,10 +2637,10 @@ SMAC_CheckPacketToHost(SMACState *state,     // IN: pointer to state
        */
 
       if (GetPacketLength(packet) < ethHeaderLen + ARP_HEADER_LEN) {
-	 VNETKdPrint((MODULE_NAME "  ToHostARP: ARP packet is insufficient "
-		      "length of IPv4 and Ethernet, expected %d got %d\n", 
-		      ethHeaderLen + ARP_HEADER_LEN, GetPacketLength(packet)));
-	 return PacketStatusDropPacket;
+         VNETKdPrint((MODULE_NAME "  ToHostARP: ARP packet is insufficient "
+                      "length of IPv4 and Ethernet, expected %u got %u\n",
+                      ethHeaderLen + ARP_HEADER_LEN, GetPacketLength(packet)));
+         return PacketStatusDropPacket;
       }
 
       /*
@@ -2649,19 +2653,19 @@ SMAC_CheckPacketToHost(SMACState *state,     // IN: pointer to state
        * of processing the second word of ARP header).
        */
 
-      if (!GetPacketData(packet, ethHeaderLen, sizeof arpHeaderWord1, 
-			 &arpHeaderWord1) || 
-	  !GetPacketData(packet, ethHeaderLen + sizeof arpHeaderWord1, 
-			 sizeof arpHeaderWord2, &arpHeaderWord2)) {
-	 VNETKdPrint((MODULE_NAME "ToHostARP: ARP header couldnt be loaded\n"));
-	 return PacketStatusDropPacket;      
+      if (!GetPacketData(packet, ethHeaderLen, sizeof arpHeaderWord1,
+          &arpHeaderWord1) ||
+          !GetPacketData(packet, ethHeaderLen + sizeof arpHeaderWord1,
+          sizeof arpHeaderWord2, &arpHeaderWord2)) {
+         VNETKdPrint((MODULE_NAME "ToHostARP: ARP header couldnt be loaded\n"));
+         return PacketStatusDropPacket;
       }
 
-      if (arpHeaderWord1 != HTONL(0x00010800) /* ethernet */ && 
-	  arpHeaderWord1 != HTONL(0x00060800) /* ieee802  */ ) {
-	 VNETKdPrint((MODULE_NAME "  ToHostARP: ARP header appears wrong, "
-	              "got %08x\n", arpHeaderWord1));
-	 return PacketStatusDropPacket;      
+      if (arpHeaderWord1 != HTONL(0x00010800) /* ethernet */ &&
+         arpHeaderWord1 != HTONL(0x00060800) /* ieee802  */ ) {
+         VNETKdPrint((MODULE_NAME "  ToHostARP: ARP header appears wrong, "
+                      "got %08x\n", arpHeaderWord1));
+         return PacketStatusDropPacket;
       }
 
       /*
@@ -3004,25 +3008,25 @@ ProcessOutgoingIPv4Packet(SMACPacket *packet,  // IN: cloned packet to process
 
       /* Verify that we have at least a whole, minimal IP header */
       if (!GetPacketData(packet, ethHeaderLen, sizeof ipHeader, ipHeader)) {
-	 VNETKdPrint((MODULE_NAME "ProcessOutgoing: couldn't get IP\n"));
-	 return;
+         VNETKdPrint((MODULE_NAME "ProcessOutgoing: couldn't get IP\n"));
+         return;
       }
 
       ipHeaderLen = 4 * (ipHeader[0] & 0xf); // version of IP header
       ipVer = ipHeader[0] >> 4; // length of IP header
       ipLen = NTOHS(*(uint16*)(ipHeader + 2)); // total datagram len
 
-      if (ipVer == 4 && GetPacketLength(packet) >= 
-            ipHeaderLen + ethHeaderLen + 2 * 4 &&
-	  GetPacketData(packet, ethHeaderLen + ipHeaderLen, 
-			sizeof typeField, &typeField) && 
-	  GetPacketData(packet, ethHeaderLen + ipHeaderLen + 1, 
-			sizeof codeField, &codeField)) {
-	 VNETKdPrint((MODULE_NAME "ProcessOutgoing: got ICMP, "
-		      "type = %d, code = %d,\n", typeField, codeField));
+      if (ipVer == 4 && GetPacketLength(packet) >=
+          ipHeaderLen + ethHeaderLen + 2 * 4 &&
+          GetPacketData(packet, ethHeaderLen + ipHeaderLen,
+                        sizeof typeField, &typeField) &&
+          GetPacketData(packet, ethHeaderLen + ipHeaderLen + 1,
+                        sizeof codeField, &codeField)) {
+         VNETKdPrint((MODULE_NAME "ProcessOutgoing: got ICMP, "
+                      "type = %u, code = %u,\n", typeField, codeField));
       } else {
-	 VNETKdPrint((MODULE_NAME "ProcessOutgoing: got ICMP, "
-	              "but couldn't process\n"));
+         VNETKdPrint((MODULE_NAME "ProcessOutgoing: got ICMP, "
+                      "but couldn't process\n"));
       }
 #endif /* DBG */
       return;
@@ -3872,11 +3876,11 @@ ProcessIncomingIPv4Packet(SMACPacket *packet, // IN/OUT: incoming packet
    }
 
    /*
-    * Verify offset=0 and M=0: mask off "fragment" flag, 
+    * Verify offset=0 and M=0: mask off "fragment" flag,
     * all others should be zero
     */
 
-   if (ipFlags & HTONS(~(uint16)(0x4000))) { 
+   if (ipFlags & HTONS((uint16)~(0x4000))) {
       VNETKdPrint((MODULE_NAME "ProcessIncoming: got a fragmented IP "
 		   "(ipFlags %04x), so not performing higher-level processing\n",
 		   ipFlags));
@@ -4225,8 +4229,8 @@ SMAC_CleanupState(SMACState **ptr) // IN: state to dealloc
    }
    if (state->numberOfIPandMACEntries != 0) {
       VNETKdPrint((MODULE_NAME "SMAC_CleanupState: "
-		   "entry count is non-zero: %d\n", 
-	           state->numberOfIPandMACEntries));
+                   "entry count is non-zero: %u\n",
+                   state->numberOfIPandMACEntries));
       ASSERT(state->numberOfIPandMACEntries == 0);
    }
 
@@ -4317,133 +4321,99 @@ LookupTypeClass(unsigned short typeValue) // IN: ethernet type
  *
  * Results:
  *       Provides textual name of type in 'type' pointer.
- *       Returns the appropriate EthClass classification for the 
- *       specified ethernet media type.
- *       
+ *
  *
  * Side effects:
- *      May modify the contents of the packet.  Length should be 
+ *      May modify the contents of the packet.  Length should be
  *      unchanged.
  *
  *----------------------------------------------------------------------
  */
 
-EthClass
-LookupTypeName(unsigned short typeValue, // IN: ethernet type 
-	       char * type)              // IN/OUT: string to store type name
+#if _WIN32
+_Use_decl_annotations_
+#endif
+void
+LookupTypeName(unsigned short typeValue, // IN: ethernet type
+               char * type,              // IN/OUT: string to store type name
+               size_t typeLen)           // IN: size of out buffer
 {
+   if (!type) {
+      return;
+   }
+
    if (typeValue <=1500) {
-      SNPRINTF((type, 15, "length %d", typeValue));
-      return EthClassCommon;
+      SNPRINTF((type, typeLen, "length %u", typeValue));
+      return;
    }
 #ifdef _WIN32
-#define STRCPY(a,b) strcpy(a,b)
+#define STRCPY_S(a,b,c) RtlStringCbCopyA(a,b,c)
 #else
-#define STRCPY(a,b) MEMCPY(a, b, sizeof b)
+#define STRCPY_S(a,b,c) MEMCPY(a, c, sizeof c)
 #endif
    if (typeValue >= 0x600) {
       switch (typeValue) {
       case 0x0800:
-	 if (type) {
-	    STRCPY(type, "IPv4");
-	 }
-	 return EthClassIPv4;
+         STRCPY_S(type, typeLen, "IPv4");
+         return;
       case 0x0806:
-	 if (type) {
-	    STRCPY(type, "ARP"); 
-	 }
-	 return EthClassARP;
+         STRCPY_S(type, typeLen, "ARP");
+         return;
       case 0x0BAD:
-	 if (type) {
-	    STRCPY(type, "Banyan VINES"); 
-	 }
-	 return EthClassUncommon;
+         STRCPY_S(type, typeLen, "Banyan VINES");
+         return;
       case 0x2000:
-	 if (type) {
-	    STRCPY(type, "Cisco CDP"); 
-	 }
-	 return EthClassCommon;
+         STRCPY_S(type, typeLen, "Cisco CDP");
+         return;
       case 0x6002:
-	 if (type) {
-	    STRCPY(type, "DEC MOP Remote Console"); 
-	 }
-	 return EthClassUncommon;
+         STRCPY_S(type, typeLen, "DEC MOP Remote Console");
+         return;
       case 0x6558:
-	 if (type) {
-	    STRCPY(type, "Trans Ether Bridging [RFC1701]"); 
-	 }
-	 return EthClassUncommon;
+         STRCPY_S(type, typeLen, "Trans Ether Bridging [RFC1701]");
+         return;
       case 0x6559:
-	 if (type) {
-	    STRCPY(type, "Raw Frame Relay [RFC1701]"); 
-	 }
-	 return EthClassUncommon;
+         STRCPY_S(type, typeLen, "Raw Frame Relay [RFC1701]");
+         return;
       case 0x8035:
-	 if (type) {
-	    STRCPY(type, "Reverse ARP"); 
-	 }
-	 return EthClassARP;
+         STRCPY_S(type, typeLen, "Reverse ARP");
+         return;
       case 0x809B:
-	 if (type) {
-	    STRCPY(type, "AppleTalk"); 
-	 }
-	 return EthClassUncommon;
+         STRCPY_S(type, typeLen, "AppleTalk");
+         return;
       case 0x80F3:
-	 if (type) {
-	    STRCPY(type, "AppleTalk AARP"); 
-	 }
-	 return EthClassUncommon;
+         STRCPY_S(type, typeLen, "AppleTalk AARP");
+         return;
       case 0x8100:
-	 if (type) {
-	    STRCPY(type, "VLAN special type"); 
-	 }
-	 return EthClassVLAN;
+         STRCPY_S(type, typeLen, "VLAN special type");
+         return;
       case 0x8137:
-	 if (type) {
-	    STRCPY(type, "Novell 8137"); 
-	 }
-	 return EthClassUncommon;
+         STRCPY_S(type, typeLen, "Novell 8137");
+         return;
       case 0x8138:
-	 if (type) {
-	    STRCPY(type, "Novell 8138"); 
-	 }
-	 return EthClassUncommon;
+         STRCPY_S(type, typeLen, "Novell 8138");
+         return;
       case 0x86DD:
-	 if (type) {
-	    STRCPY(type, "IPv6"); 
-	 }
-	 return EthClassIPv6;
+         STRCPY_S(type, typeLen, "IPv6");
+         return;
       case 0x876B:
-	 if (type) {
-	    STRCPY(type, "TCP/IP Compression [RFC1144]"); 
-	 }
-	 return EthClassUncommon;
+         STRCPY_S(type, typeLen, "TCP/IP Compression [RFC1144]");
+         return;
       case 0x886f:
-	 if (type) {
-	    STRCPY(type, "Microsoft 886f"); 
-	 }
-	 return EthClassCommon;
+         STRCPY_S(type, typeLen, "Microsoft 886f");
+         return;
       case 0x888e:
-         if (type) {
-            STRCPY(type, "EAPOL");
-         }
-         return EthClassEAPOL;
+         STRCPY_S(type, typeLen, "EAPOL");
+         return;
       case 0x88c7:
-         if (type) {
-            STRCPY(type, "802.11i pre-auth");
-         }
-         return EthClassEAPOL;
+         STRCPY_S(type, typeLen, "802.11i pre-auth");
+         return;
       default:
-	 if (type) {
-	    SNPRINTF((type, 40, "unknown type 0x%04x", typeValue));
-	 }
-	 return EthClassUnknown;
+         SNPRINTF((type, typeLen, "unknown type 0x%04x", typeValue));
+         return;
       }
    } else {
-      if (type) {
-	 SNPRINTF((type, 40, "invalid value 0x%04x", typeValue));
-      }
-      return EthClassUnknown;
+      SNPRINTF((type, typeLen, "invalid value 0x%04x", typeValue));
+      return;
    }
 }
 #endif

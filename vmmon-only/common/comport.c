@@ -1,5 +1,5 @@
 /*********************************************************
- * Copyright (C) 2006 VMware, Inc. All rights reserved.
+ * Copyright (C) 2006,2016 VMware, Inc. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License as published by the
@@ -113,7 +113,7 @@ CP_PutDec(uint32 value) // IN
       s[i++] = (value % 10) + '0';
       value /= 10;
    } while (value > 0);
-   while (i > 0) CP_PutChr (s[--i]);
+   while (--i >= 0) CP_PutChr(s[i]);
 #endif
 }
 
