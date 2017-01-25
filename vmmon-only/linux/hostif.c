@@ -1163,11 +1163,15 @@ HostIFGetUserPages(void *uvAddr,          // IN
    int retval;
 
    down_read(&current->mm->mmap_sem);
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 9, 0)
+   retval = get_user_pages((unsigned long)uvAddr, numPages, 0, ppages, NULL);
+#else
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 6, 0)
    retval = get_user_pages((unsigned long)uvAddr, numPages, 0, 0, ppages, NULL);
 #else
    retval = get_user_pages(current, current->mm, (unsigned long)uvAddr,
                            numPages, 0, 0, ppages, NULL);
+#endif
 #endif
    up_read(&current->mm->mmap_sem);
 
