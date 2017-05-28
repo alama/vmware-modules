@@ -73,8 +73,11 @@
 #include <linux/capability.h>
 #include <linux/kthread.h>
 #include <linux/wait.h>
-
+#include <linux/signal.h>
 #include <asm/apic.h>
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 11, 0)
+#include <linux/taskstats_kern.h> // For linux/sched/signal.h without version check
+#endif
 
 #include "vmware.h"
 #include "x86apic.h"
