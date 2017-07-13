@@ -61,7 +61,6 @@ sys_ioctl(unsigned int fd, unsigned int cmd, unsigned long arg);
 
 #include "vmware.h"
 #include "driverLog.h"
-#include "pgtbl.h"
 #include "vmci_defs.h"
 #include "vmci_handle_array.h"
 #include "vmci_infrastructure.h"
