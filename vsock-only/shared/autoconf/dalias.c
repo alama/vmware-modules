@@ -1,5 +1,5 @@
 /*********************************************************
- * Copyright (C) 2015 VMware, Inc. All rights reserved.
+ * Copyright (C) 2015-2016 VMware, Inc. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License as published by the
@@ -20,13 +20,16 @@
 #include "compat_autoconf.h"
 
 #if LINUX_VERSION_CODE < KERNEL_VERSION(3, 19, 0)
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 2, 0)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 6, 0)
 #include <linux/dcache.h>
 #include <linux/list.h>
 
 /*
  * After 3.19.0, the dentry d_alias field was moved. Fedora
- * backported this behavior into a 3.18.0 kernel.
+ * backported this behavior into earlier kernel versions.
+ * The type of the d_alias field changed from 3.6 onwards
+ * which was a list head to being a list node. The check
+ * for earlier than 3.6 is done separately.
  *
  * This test will fail on a kernel with such a patch.
  */
@@ -38,7 +41,7 @@ void test(void)
 }
 
 #else
-/* Intentionally passes for earlier than 3.9.0 kernels as d_alias is valid. */
+/* Intentionally passes for earlier than 3.6.0 kernels as a separate test is done. */
 #endif
 #else
 #error "This test intentionally fails on 3.19.0 or newer kernels."

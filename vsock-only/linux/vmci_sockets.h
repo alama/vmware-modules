@@ -1,5 +1,5 @@
 /*********************************************************
- * Copyright (C) 2007-2015 VMware, Inc. All rights reserved.
+ * Copyright (C) 2007-2016 VMware, Inc. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License as published by the
@@ -31,7 +31,7 @@
 #     include <winsock2.h>
 #  endif // !NT_INCLUDED
 #else // _WIN32
-#if defined(linux) && !defined(VMKERNEL)
+#if defined(__linux__) && !defined(VMKERNEL)
 #  if !defined(__KERNEL__)
 #    include <sys/socket.h>
 #  endif // __KERNEL__
@@ -44,6 +44,11 @@
 #  endif // __FreeBSD__
 #endif // linux && !VMKERNEL
 #endif
+
+#if defined __cplusplus
+extern "C" {
+#endif
+
 
 /**
  * \brief Option name for STREAM socket buffer size.
@@ -489,8 +494,8 @@ struct uuid_2_cid {
       }
 #  endif // !NT_INCLUDED
 #else // _WIN32
-#if (defined(linux) && !defined(VMKERNEL)) || (defined(__APPLE__))
-#  if defined(linux) && defined(__KERNEL__)
+#if (defined(__linux__) && !defined(VMKERNEL)) || (defined(__APPLE__))
+#  if defined(__linux__) && defined(__KERNEL__)
    void VMCISock_KernelRegister(void);
    void VMCISock_KernelDeregister(void);
    int VMCISock_GetAFValue(void);
@@ -509,7 +514,7 @@ struct uuid_2_cid {
 /** \cond PRIVATE */
 #  define VMCI_SOCKETS_DEFAULT_DEVICE      "/dev/vsock"
 #  define VMCI_SOCKETS_CLASSIC_ESX_DEVICE  "/vmfs/devices/char/vsock/vsock"
-#  if defined(linux)
+#  if defined(__linux__)
 #     define VMCI_SOCKETS_VERSION       1972
 #     define VMCI_SOCKETS_GET_AF_VALUE  1976
 #     define VMCI_SOCKETS_GET_LOCAL_CID 1977
@@ -595,7 +600,8 @@ struct uuid_2_cid {
     * \param[out]    outFd    File descriptor to the VMCI device.  The
     *                         address family value is valid until this
     *                         descriptor is closed.  This parameter is
-    *                         only valid if the return value is not -1.
+    *                         not necessarily valid, but it is set if
+    *                         the return value is not -1.
     *                         Call VMCISock_ReleaseAFValueFd() to  close
     *                         this descriptor.
     *
@@ -623,7 +629,7 @@ struct uuid_2_cid {
       int fd;
       int family = -1;
 
-#if defined(linux)
+#if defined(__linux__)
       /*
        * vSockets is now in mainline kernel with address family 40.  As part
        * of upstreaming, we removed the IOCTL we use below to determine the
@@ -640,6 +646,9 @@ struct uuid_2_cid {
          int s = socket(AF_VSOCK_LOCAL, SOCK_DGRAM, 0);
          if (s != -1) {
             close(s);
+            if (outFd) {
+               *outFd = -1;
+            }
             return AF_VSOCK_LOCAL;
          }
       }
@@ -852,6 +861,10 @@ struct uuid_2_cid {
 #endif // __FreeBSD__
 #endif // _WIN32
 
+
+#if defined __cplusplus
+} // extern "C"
+#endif
 
 #endif // _VMCI_SOCKETS_H_
 

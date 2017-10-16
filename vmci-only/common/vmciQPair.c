@@ -1,5 +1,5 @@
 /*********************************************************
- * Copyright (C) 2010-2012 VMware, Inc. All rights reserved.
+ * Copyright (C) 2010-2016 VMware, Inc. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License as published by the
@@ -122,10 +122,6 @@ static INLINE int
 VMCIQPairLock(const VMCIQPair *qpair) // IN
 {
 #if !defined VMX86_VMX
-   if (qpair->flags & VMCI_QPFLAG_PINNED) {
-      VMCI_LockQueueHeader(qpair->produceQ);
-      return VMCI_SUCCESS;
-   }
    return VMCI_AcquireQueueMutex(qpair->produceQ,
                                  !(qpair->flags & VMCI_QPFLAG_NONBLOCK));
 #else
@@ -154,11 +150,7 @@ static INLINE void
 VMCIQPairUnlock(const VMCIQPair *qpair) // IN
 {
 #if !defined VMX86_VMX
-   if (qpair->flags & VMCI_QPFLAG_PINNED) {
-      VMCI_UnlockQueueHeader(qpair->produceQ);
-   } else {
-      VMCI_ReleaseQueueMutex(qpair->produceQ);
-   }
+   VMCI_ReleaseQueueMutex(qpair->produceQ);
 #endif
 }
 
@@ -222,6 +214,60 @@ VMCIQPairUnlockHeader(const VMCIQPair *qpair) // IN
       VMCI_ReleaseQueueMutex(qpair->produceQ);
    }
 #endif
+}
+
+
+/*
+ *-----------------------------------------------------------------------------
+ *
+ * VMCIQueueAddProducerTail() --
+ *
+ *      Helper routine to increment the Producer Tail.
+ *
+ * Results:
+ *      VMCI_ERROR_NOT_FOUND if the vmmWorld registered with the queue
+ *      cannot be found. Otherwise VMCI_SUCCESS.
+ *
+ * Side effects:
+ *      None.
+ *
+ *-----------------------------------------------------------------------------
+ */
+
+static INLINE int
+VMCIQueueAddProducerTail(VMCIQueue *queue, // IN/OUT
+                         size_t add,       // IN
+                         uint64 queueSize) // IN
+{
+   VMCIQueueHeader_AddProducerTail(queue->qHeader, add, queueSize);
+   return VMCI_QueueHeaderUpdated(queue);
+}
+
+
+/*
+ *-----------------------------------------------------------------------------
+ *
+ * VMCIQueueAddConsumerHead() --
+ *
+ *      Helper routine to increment the Consumer Head.
+ *
+ * Results:
+ *      VMCI_ERROR_NOT_FOUND if the vmmWorld registered with the queue
+ *      cannot be found. Otherwise VMCI_SUCCESS.
+ *
+ * Side effects:
+ *      None.
+ *
+ *-----------------------------------------------------------------------------
+ */
+
+static INLINE int
+VMCIQueueAddConsumerHead(VMCIQueue *queue, // IN/OUT
+                         size_t add,       // IN
+                         uint64 queueSize) // IN
+{
+   VMCIQueueHeader_AddConsumerHead(queue->qHeader, add, queueSize);
+   return VMCI_QueueHeaderUpdated(queue);
 }
 
 
@@ -477,27 +523,8 @@ vmci_qpair_alloc(VMCIQPair **qpair,            // OUT
       }
    }
 
-   if ((flags & (VMCI_QPFLAG_NONBLOCK | VMCI_QPFLAG_PINNED)) && !vmkernel) {
+   if (flags & VMCI_QPFLAG_NONBLOCK && !vmkernel) {
       return VMCI_ERROR_INVALID_ARGS;
-   }
-
-   if (flags & VMCI_QPFLAG_PINNED) {
-      /*
-       * Pinned pages implies non-blocking mode.  Technically it doesn't
-       * have to, but there doesn't seem much point in pinning the pages if you
-       * can block since the queues will be small, so there's no performance
-       * gain to be had.
-       */
-
-      if (!(flags & VMCI_QPFLAG_NONBLOCK)) {
-         return VMCI_ERROR_INVALID_ARGS;
-      }
-
-      /* Limit the amount of memory that can be pinned. */
-
-      if (produceQSize + consumeQSize > VMCI_MAX_PINNED_QP_MEMORY) {
-         return VMCI_ERROR_NO_RESOURCES;
-      }
    }
 
    myQPair = VMCI_AllocKernelMem(sizeof *myQPair, VMCI_MEMORY_NONPAGED);
@@ -511,7 +538,8 @@ vmci_qpair_alloc(VMCIQPair **qpair,            // OUT
    myQPair->flags = flags;
    myQPair->privFlags = privFlags;
 
-   wakeupCB = clientData = NULL;
+   clientData = NULL;
+   wakeupCB = NULL;
    if (VMCI_ROUTE_AS_HOST == route) {
       myQPair->guestEndpoint = FALSE;
       if (!(flags & VMCI_QPFLAG_LOCAL)) {
@@ -905,6 +933,8 @@ vmci_qpair_consume_buf_ready(const VMCIQPair *qpair) // IN
  *      VMCI_ERROR_INVALID_ARGS, if an error occured when accessing the buffer.
  *      VMCI_ERROR_QUEUEPAIR_NOTATTACHED, if the queue pair pages aren't
  *      available.
+ *      VMCI_ERROR_NOT_FOUND, if the vmmWorld registered with the queue pair
+ *      cannot be found.
  *      Otherwise, the number of bytes written to the queue is returned.
  *
  * Side effects:
@@ -971,7 +1001,10 @@ EnqueueLocked(VMCIQueue *produceQ,                   // IN
       return result;
    }
 
-   VMCIQueueHeader_AddProducerTail(produceQ->qHeader, written, produceQSize);
+   result = VMCIQueueAddProducerTail(produceQ, written, produceQSize);
+   if (result < VMCI_SUCCESS) {
+      return result;
+   }
    return written;
 }
 
@@ -991,6 +1024,8 @@ EnqueueLocked(VMCIQueue *produceQ,                   // IN
  *      VMCI_ERROR_INVALID_SIZE, if any queue pointer is outside the queue
  *      (as defined by the queue size).
  *      VMCI_ERROR_INVALID_ARGS, if an error occured when accessing the buffer.
+ *      VMCI_ERROR_NOT_FOUND, if the vmmWorld registered with the queue pair
+ *      cannot be found.
  *      Otherwise the number of bytes dequeued is returned.
  *
  * Side effects:
@@ -1053,9 +1088,10 @@ DequeueLocked(VMCIQueue *produceQ,                        // IN
    }
 
    if (updateConsumer) {
-      VMCIQueueHeader_AddConsumerHead(produceQ->qHeader,
-                                      read,
-                                      consumeQSize);
+      result = VMCIQueueAddConsumerHead(produceQ, read, consumeQSize);
+      if (result < VMCI_SUCCESS) {
+         return result;
+      }
    }
 
    return read;

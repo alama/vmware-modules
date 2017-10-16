@@ -1,5 +1,5 @@
 /*********************************************************
- * Copyright (C) 2006 VMware, Inc. All rights reserved.
+ * Copyright (C) 2016 VMware, Inc. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License as published by the
@@ -16,26 +16,38 @@
  *
  *********************************************************/
 
-/*
- * Detect whether skb_linearize takes one or two arguments.
- */
-
 #include "compat_version.h"
 #include "compat_autoconf.h"
 
-#if LINUX_VERSION_CODE <= KERNEL_VERSION(2, 6, 17)
+#if LINUX_VERSION_CODE < KERNEL_VERSION(3, 17, 0) && \
+    LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 13)
+
+#include <linux/fs.h>
+#include <linux/wait.h>
+#include <linux/sched.h>
+
+unsigned long test_bits;
+
 /*
- * Since 2.6.18 all kernels have single-argument skb_linearize.  For
- * older kernels use autodetection.  Not using autodetection on newer
- * kernels saves us from compile failure on some post 2.6.18 kernels
- * which do not have selfcontained skbuff.h.
+ * After 3.17.0, wait_on_bit changed its interface to remove the action
+ * callback argument and this was backported to some Linux kernel versions
+ * such as 3.10 for the RHEL 7.3 version.
+ *
+ * This test will fail on a kernel with such a patch.
  */
 
-#include <linux/skbuff.h>
-
-int test_skb_linearize(struct sk_buff *skb)
+int test(void)
 {
-   return skb_linearize(skb);
-}
 
+   return wait_on_bit(&test_bits,
+                      0,
+                      NULL,
+                      TASK_UNINTERRUPTIBLE);
+}
+#elif LINUX_VERSION_CODE >= KERNEL_VERSION(3, 17, 0)
+#error "This test intentionally fails on 3.17.0 and newer kernels."
+#else
+/*
+ * It must be older than 2.6.13 in which case we don't use the function.
+ */
 #endif
