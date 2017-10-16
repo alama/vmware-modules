@@ -1,5 +1,5 @@
 /*********************************************************
- * Copyright (C) 2007-2014 VMware, Inc. All rights reserved.
+ * Copyright (C) 2007-2016 VMware, Inc. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License as published by the
@@ -25,7 +25,6 @@
 
 #ifndef _VSOCK_SOCKET_WRAPPER_H_
 #define _VSOCK_SOCKET_WRAPPER_H_
-
 
 /*
  * Socket states and flags.  Note that MSG_WAITALL is only defined on 2K3,
@@ -107,6 +106,7 @@
  * Error codes.
  */
 #if defined(_WIN32)
+// Some defines are needed for the older SDK.
 # if !defined(EINTR)
 #  define EINTR               WSAEINTR
 # endif
@@ -128,6 +128,7 @@
 # if !defined(EAGAIN)
 #  define EAGAIN              WSAEWOULDBLOCK
 # endif
+# if !defined(EWOULDBLOCK)
 #  define EWOULDBLOCK         WSAEWOULDBLOCK
 #  define EINPROGRESS         WSAEINPROGRESS
 #  define EALREADY            WSAEALREADY
@@ -137,9 +138,7 @@
 #  define EPROTOTYPE          WSAEPROTOTYPE
 #  define ENOPROTOOPT         WSAENOPROTOOPT
 #  define EPROTONOSUPPORT     WSAEPROTONOSUPPORT
-#  define ESOCKTNOSUPPORT     WSAESOCKTNOSUPPORT
 #  define EOPNOTSUPP          WSAEOPNOTSUPP
-#  define EPFNOSUPPORT        WSAEPFNOSUPPORT
 #  define EAFNOSUPPORT        WSAEAFNOSUPPORT
 #  define EADDRINUSE          WSAEADDRINUSE
 #  define EADDRNOTAVAIL       WSAEADDRNOTAVAIL
@@ -151,11 +150,14 @@
 #  define ENOBUFS             WSAENOBUFS
 #  define EISCONN             WSAEISCONN
 #  define ENOTCONN            WSAENOTCONN
-#  define ESHUTDOWN           WSAESHUTDOWN
 #  define ETIMEDOUT           WSAETIMEDOUT
 #  define ECONNREFUSED        WSAECONNREFUSED
-#  define EHOSTDOWN           WSAEHOSTDOWN
 #  define EHOSTUNREACH        WSAEHOSTUNREACH
+# endif
+#  define ESOCKTNOSUPPORT     WSAESOCKTNOSUPPORT
+#  define EPFNOSUPPORT        WSAEPFNOSUPPORT
+#  define ESHUTDOWN           WSAESHUTDOWN
+#  define EHOSTDOWN           WSAEHOSTDOWN
 #  define __ELOCALSHUTDOWN    ESHUTDOWN
 #  define __ELOCALRCVSHUTDOWN __ELOCALSHUTDOWN
 #  define __EPEERSHUTDOWN     ECONNABORTED
@@ -216,7 +218,7 @@
 #  define __ECONNINPROGRESS   EINPROGRESS
 #  define __ESNDRCVTIMEDOUT   EAGAIN
 #  define ESYSNOTREADY        EOPNOTSUPP
-#elif defined(linux)
+#elif defined(__linux__)
 #  define ESYSNOTREADY        EOPNOTSUPP
 #  define __ELOCALSHUTDOWN    EPIPE
 #  define __ELOCALRCVSHUTDOWN 0
@@ -242,12 +244,12 @@
 #  define closesocket(_s)     close((_s))
    typedef int32              SOCKET;
 #else
-#if defined(linux) || defined(__APPLE__)
+#if defined(__linux__) || defined(__APPLE__)
 #  define SOCKET_ERROR        (-1)
 #  define INVALID_SOCKET      ((SOCKET) -1)
 #  define sockerr()           errno
 #  define sockcleanup()       do {} while (0)
-#if defined(linux)
+#if defined(__linux__)
 #  define sockerr2err(_e)     (((_e) > 0) ? -(_e) : (_e))
 #  define closesocket(_s)     close((_s))
    typedef int32              SOCKET;

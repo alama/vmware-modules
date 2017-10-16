@@ -26,7 +26,7 @@
 #include "os.h"
 
 #if defined(vmblock_fuse)
-#elif defined(linux)
+#elif defined(__linux__)
 # include "vmblockInt.h"
 #elif defined(sun)
 # include "module.h"

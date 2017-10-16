@@ -1,5 +1,5 @@
 /*********************************************************
- * Copyright (C) 2006-2014 VMware, Inc. All rights reserved.
+ * Copyright (C) 2006-2016 VMware, Inc. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License as published by the
@@ -27,16 +27,18 @@
 #ifndef _VMCI_KERNEL_IF_H_
 #define _VMCI_KERNEL_IF_H_
 
-#if !defined(linux) && !defined(_WIN32) && !defined(__APPLE__) && \
+#if !defined(__linux__) && !defined(_WIN32) && !defined(__APPLE__) && \
     !defined(VMKERNEL)
 #  error "Platform not supported."
 #endif
 
 #if defined(_WIN32)
 #  include <ntddk.h>
+#else
+#define UNREFERENCED_PARAMETER(P)
 #endif
 
-#if defined(linux) && !defined(VMKERNEL)
+#if defined(__linux__) && !defined(VMKERNEL)
 #  include "driver-config.h"
 #  include "compat_cred.h"
 #  include "compat_module.h"
@@ -70,6 +72,11 @@
 #  include "dbllnklst.h"
 #endif
 
+#if defined __cplusplus
+extern "C" {
+#endif
+
+
 /* Flags for specifying memory type. */
 #define VMCI_MEMORY_NORMAL   0x0
 #define VMCI_MEMORY_ATOMIC   0x1
@@ -79,7 +86,7 @@
 
 #if defined(VMKERNEL)
 #  define VMCI_EXPORT_SYMBOL(_SYMBOL)  VMK_MODULE_EXPORT_SYMBOL(_SYMBOL);
-#elif defined(linux)
+#elif defined(__linux__)
 #  define VMCI_EXPORT_SYMBOL(_symbol)  EXPORT_SYMBOL(_symbol);
 #elif defined(__APPLE__)
 #  define VMCI_EXPORT_SYMBOL(_symbol)  __attribute__((visibility("default")))
@@ -95,7 +102,7 @@
   typedef World_ID VMCIHostVmID;
   typedef uint32 VMCIHostUser;
   typedef PPN *VMCIQPGuestMem;
-#elif defined(linux)
+#elif defined(__linux__)
   typedef spinlock_t VMCILock;
   typedef unsigned long VMCILockFlags;
   typedef wait_queue_head_t VMCIEvent;
@@ -194,7 +201,7 @@ typedef struct VMCIHost {
                               * First one is the active one and the second
                               * one is shadow world during FSR.
                               */
-#elif defined(linux)
+#elif defined(__linux__)
    wait_queue_head_t  waitQueue;
 #elif defined(__APPLE__)
    struct Socket *socket; /* vmci Socket object on Mac OS. */
@@ -209,7 +216,7 @@ typedef struct VMCIHost {
  * Guest device port I/O.
  */
 
-#if defined(linux)
+#if defined(__linux__)
    typedef unsigned short int VMCIIoPort;
    typedef int VMCIIoHandle;
 #elif defined(_WIN32)
@@ -375,6 +382,8 @@ typedef uint32 VMCIGuestMemID;
                                     struct VMCIQueue *consumeQ);
   void VMCIHost_MarkQueuesUnavailable(struct VMCIQueue *produceQ,
                                       struct VMCIQueue *consumeQ);
+  int VMCIHost_RevalidateQueues(struct VMCIQueue *produceQ,
+                                struct VMCIQueue *consumeQ);
 #else
 #  define VMCIHost_MarkQueuesAvailable(_q, _p) do { } while (0)
 #  define VMCIHost_MarkQueuesUnavailable(_q, _p) do { } while(0)
@@ -386,6 +395,12 @@ typedef uint32 VMCIGuestMemID;
 #else
 #  define VMCI_LockQueueHeader(_q) NOT_IMPLEMENTED()
 #  define VMCI_UnlockQueueHeader(_q) NOT_IMPLEMENTED()
+#endif
+
+#if defined(VMKERNEL)
+   int VMCI_QueueHeaderUpdated(struct VMCIQueue *produceQ);
+#else
+#  define VMCI_QueueHeaderUpdated(_q) VMCI_SUCCESS
 #endif
 
 #if (!defined(VMKERNEL) && defined(__linux__)) || defined(_WIN32) ||  \
@@ -447,6 +462,11 @@ Bool VMCI_HostPersonalityActive(void);
 #  define VMCIList_ScanSafe(_cur, _next, _l) DblLnkLst_ForEachSafe(_cur, _next, _l)
 #  define VMCIList_Entry(_elem, _type, _field) DblLnkLst_Container(_elem, _type, _field)
 #  define VMCIList_First(_l) (VMCIList_Empty(_l)?NULL:(_l)->next)
+#endif
+
+
+#if defined __cplusplus
+} // extern "C"
 #endif
 
 #endif // _VMCI_KERNEL_IF_H_
